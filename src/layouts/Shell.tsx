@@ -8,7 +8,7 @@ import type { Role } from '../data/types';
 import { ago } from '../data/rules';
 import { ME, PERSONA } from '../data/seed';
 import { useStore } from '../store/store';
-import { Logo, useToast } from '../ui/kit';
+import { Logo, Notice, useToast } from '../ui/kit';
 
 interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; count?: number; tab?: boolean }
 interface NavGroup { label?: string; items: NavItem[] }
@@ -94,10 +94,10 @@ function Palette({ role, base, nav, onClose }: { role: Role; base: string; nav: 
 }
 
 export function Shell({ role }: { role: Role }) {
-  const { db, act } = useStore();
+  const { db, act, sync, connect } = useStore();
   const nav = useNav(role);
   const base = `/app/${role}`;
-  const me = ME[role];
+  const me = db.me?.role === role ? db.me.id : ME[role];
   const persona = PERSONA[role];
   const [theme, setTheme] = useTheme();
   const [open, setOpen] = useState(false);
@@ -108,6 +108,8 @@ export function Shell({ role }: { role: Role }) {
   const navigate = useNavigate();
   const toast = useToast();
 
+  // With VITE_API_URL set, sign this portal in and load its data from the server.
+  useEffect(() => { connect(role); }, [connect, role]);
   useEffect(() => { setOpen(false); setBell(false); setRoles(false); window.scrollTo(0, 0); }, [loc.pathname]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(true); } };
@@ -199,7 +201,11 @@ export function Shell({ role }: { role: Role }) {
               </div>
             </div>
           </div>
-          <main className="page" key={loc.pathname}><Outlet /></main>
+          <main className="page" key={loc.pathname}>
+            {sync.mode === 'api' && sync.status === 'connecting' && <Notice tone="info">Connecting to the server…</Notice>}
+            {sync.mode === 'api' && sync.status === 'error' && <Notice tone="crit">Server: {sync.error}. The screen shows the server's latest data.</Notice>}
+            <Outlet />
+          </main>
         </div>
 
         <nav className="tabbar" aria-label="Quick">

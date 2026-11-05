@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { BloodGroup, Camp, Component, DB, DonorRequest, LeadStage, Notice, Order, Role, Stage, Wallet } from '../data/types';
 import { COMPONENTS, MIN_HB, processingFee, uid } from '../data/rules';
 import { makeSeed } from '../data/seed';
+import { apiMode, call, ensureSession, fetchDb, subscribe } from '../api/client';
 
 const KEY = 'raktkoshika-demo-v1';
 const load = (): DB => {
@@ -309,28 +310,125 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
 }
 
 type Actions = ReturnType<typeof useActions>;
-const Ctx = createContext<{ db: DB; act: Actions } | null>(null);
+type Remote = { [K in keyof Actions]?: (result: ReturnType<Actions[K]>, ...args: Parameters<Actions[K]>) => Promise<unknown> };
+
+/** Profile fields are edited per keystroke; batch them into one PATCH. */
+let profilePatch: Partial<DB['profile']> = {};
+let profileTimer: ReturnType<typeof setTimeout> | undefined;
+const patchProfile = (patch: Partial<DB['profile']>) => new Promise((resolve, reject) => {
+  profilePatch = { ...profilePatch, ...patch };
+  clearTimeout(profileTimer);
+  profileTimer = setTimeout(() => { const body = profilePatch; profilePatch = {}; call('PATCH', '/profile', body).then(resolve, reject); }, 500);
+});
+
+/** The same actions, sent to the server. Each one receives the local result first (used for ids the UI already showed). */
+const remote: Remote = {
+  reset: () => call('POST', '/admin/reset'),
+  placeOrder: (id, { ownerId: _o, actor: _a, ...input }) => call('POST', '/orders', { ...input, id }),
+  advanceOrder: (_r, id) => call('POST', `/orders/${id}/advance`),
+  closeOrder: (_r, id, _actor, stage, why) => call('POST', `/orders/${id}/${stage === 'rejected' ? 'reject' : 'cancel'}`, { reason: why }),
+  reportReaction: (_r, id, text) => call('POST', `/orders/${id}/reaction`, { text }),
+  topUp: (_r, _owner, amount, method) => call('POST', '/wallet/topup', { amount, method }),
+  settle: (_r, _owner, amount) => call('POST', '/wallet/payout', { amount }),
+  giftCredit: (_r, _owner, member) => call('POST', '/wallet/gift-credit', { member }),
+  addFamily: (_r, name, relation, group) => call('POST', '/profile/family', { name, relation, group }),
+  updateProfile: (_r, patch) => patchProfile(patch),
+  bookDonation: (id, bankId, date, slot, campId) => call('POST', '/donations', { id, bankId, date, slot, campId }),
+  cancelDonation: (_r, id) => call('POST', `/donations/${id}/cancel`),
+  recordDonation: (_r, id, hb) => call('POST', `/donations/${id}/record`, { hb }),
+  releaseQuarantine: (_r, ids) => call('POST', '/stock/release', { ids }),
+  discard: (_r, id, reason) => call('POST', `/stock/${id}/discard`, { reason }),
+  transfer: (_r, id, toBank) => call('POST', `/stock/${id}/transfer`, { toBank }),
+  requestCamp: (_r, c) => call('POST', '/camps', { org: c.org, venue: c.venue, city: c.city, date: c.date, target: c.target, bankIds: c.bankIds }),
+  campRespond: (_r, id, status, bankId) => call('POST', `/camps/${id}/respond`, { status, bankId }),
+  postRequest: (_r, q) => call('POST', '/requests', { group: q.group, units: q.units, hospital: q.hospital, city: q.city, neededBy: q.neededBy, note: q.note, feeSupport: q.feeSupport }),
+  respond: (_r, id) => call('POST', `/requests/${id}/respond`),
+  closeRequest: (_r, id) => call('POST', `/requests/${id}/close`),
+  send: (_r, threadId, _from, text) => call('POST', `/threads/${threadId}/messages`, { text }),
+  broadcast: (_r, group, city, note) => call('POST', '/broadcasts', { group, city, note }),
+  readNotices: () => call('POST', '/notices/read'),
+  addCenter: (_r, name, city, license) => call('POST', '/bank/centres', { name, city, license }),
+  addReferral: (_r, name, kind, city, contact) => call('POST', '/bank/referrals', { name, kind, city, contact }),
+  addExpense: (_r, head, amount) => call('POST', '/bank/expenses', { head, amount }),
+  addPlan: (_r, p) => call('POST', '/plans', { patient: p.patient, group: p.group, component: p.component, units: p.units, everyDays: p.everyDays, bankId: p.bankId, next: p.next }),
+  togglePlan: (_r, id) => call('POST', `/plans/${id}/toggle`),
+  decideApplication: (_r, id, status) => call('POST', `/applications/${id}/decision`, { status }),
+  submitApplication: (_r, name, city, license) => call('POST', '/applications', { name, city, license }),
+  moveLead: (_r, id, stage) => call('PATCH', `/leads/${id}`, { stage }),
+  addLead: (_r, name, city, contact, plan) => call('POST', '/leads', { name, city, contact, plan }),
+  resolveTicket: (_r, id) => call('POST', `/tickets/${id}/resolve`),
+  addTicket: (_r, _from, subject) => call('POST', '/tickets', { subject }),
+};
+
+export type SyncState = { mode: 'local' } | { mode: 'api'; status: 'connecting' | 'ready' | 'error'; error?: string };
+interface StoreValue { db: DB; act: Actions; sync: SyncState; connect: (role: Role) => void }
+const Ctx = createContext<StoreValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [db, setState] = useState<DB>(load);
+  const [sync, setSync] = useState<SyncState>(apiMode ? { mode: 'api', status: 'connecting' } : { mode: 'local' });
   const latest = useRef(db);
   const setDb = useCallback((fn: (d: DB) => void) => {
     const next = structuredClone(latest.current);
     fn(next);
     latest.current = next;
     setState(next);
-    try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* the demo keeps working in memory */ }
+    if (!apiMode) { try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* the demo keeps working in memory */ } }
   }, []);
-  // Keeps portals open in separate tabs in step, which is the core of the live demo.
+
+  // ---- API mode: the server is the source of truth; local actions only paint the change instantly. ----
+  const refresh = useCallback(async () => {
+    const next = await fetchDb();
+    latest.current = next; setState(next);
+    setSync((s) => (s.mode === 'api' && s.status === 'connecting' ? { mode: 'api', status: 'ready' } : s));
+  }, []);
+  const fail = useCallback((e: unknown) => {
+    const error = e instanceof Error ? e.message : String(e);
+    console.error('[api]', e);
+    setSync({ mode: 'api', status: 'error', error });
+  }, []);
+  const connected = useRef<Role | null>(null);
+  const unsub = useRef<() => void>(() => {});
+  const connect = useCallback((role: Role) => {
+    if (!apiMode || connected.current === role) return;
+    connected.current = role;
+    setSync({ mode: 'api', status: 'connecting' });
+    unsub.current();
+    ensureSession(role).then(refresh).then(() => {
+      let t: ReturnType<typeof setTimeout> | undefined;
+      unsub.current = subscribe(() => { clearTimeout(t); t = setTimeout(() => { refresh().catch(fail); }, 150); });
+    }).catch(fail);
+  }, [refresh, fail]);
+  useEffect(() => () => unsub.current(), []);
+
+  // ---- Local mode: keeps portals open in separate tabs in step, which is the core of the live demo. ----
   useEffect(() => {
+    if (apiMode) return;
     const onStorage = (e: StorageEvent) => {
       if (e.key === KEY && e.newValue) { const v = JSON.parse(e.newValue) as DB; latest.current = v; setState(v); }
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
-  const act = useActions(setDb);
-  const value = useMemo(() => ({ db, act }), [db, act]);
+
+  const local = useActions(setDb);
+  const act = useMemo(() => {
+    if (!apiMode) return local;
+    const wrapped = {} as Record<string, (...a: unknown[]) => unknown>;
+    for (const k of Object.keys(local) as (keyof Actions)[]) {
+      const fn = local[k] as (...a: unknown[]) => unknown;
+      const send = remote[k] as ((r: unknown, ...a: unknown[]) => Promise<unknown>) | undefined;
+      wrapped[k] = (...args: unknown[]) => {
+        const result = fn(...args);
+        // A rejected write (no stock, low balance, no permission) is undone by reloading the server's copy.
+        send?.(result, ...args).then(() => setSync({ mode: 'api', status: 'ready' }), fail).finally(() => { refresh().catch(fail); });
+        return result;
+      };
+    }
+    return wrapped as unknown as Actions;
+  }, [local, refresh, fail]);
+
+  const value = useMemo(() => ({ db, act, sync, connect }), [db, act, sync, connect]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() {

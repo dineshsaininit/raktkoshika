@@ -61,4 +61,6 @@ export interface DB {
   requests: DonorRequest[]; threads: Thread[]; notices: Notice[]; referrals: Referral[]; accounts: AccountEntry[];
   applications: Application[]; leads: Lead[]; tickets: Ticket[]; audit: AuditEntry[]; profile: Profile; plans: ThalPlan[];
   months: MonthPoint[]; sensors: Sensor[];
+  /** Signed-in account, sent by the server in API mode. */
+  me?: { id: string; role: Role; name: string; org: string; initials: string };
 }
