@@ -5,12 +5,11 @@ import { config } from '../config.ts';
 import { me, requireAuth, requireRole } from '../lib/auth.ts';
 import { bus, emitChange } from '../lib/events.ts';
 import { forbidden, parse } from '../lib/http.ts';
-import { Bank, Batch, toApi } from '../models/index.ts';
 import * as C from '../services/community.ts';
 import * as O from '../services/orders.ts';
 import * as P from '../services/people.ts';
 import { seedDatabase } from '../services/seed.ts';
-import { snapshot } from '../services/snapshot.ts';
+import { publicSnapshot, snapshot } from '../services/snapshot.ts';
 
 export const api = Router();
 
@@ -28,20 +27,8 @@ const ok = { ok: true };
 
 api.get('/health', (_req, res) => { res.json({ ok: true, time: new Date().toISOString() }); });
 
-/** Live stock for the public "find blood" page: available, in-date unit counts per centre, group and component. */
-api.get('/public/stock', async (req, res) => {
-  const q = parse(z.object({ group: group.optional(), component: component.optional(), city: z.string().optional() }), req.query);
-  const match: Record<string, unknown> = { status: 'available', expiry: { $gt: new Date() } };
-  if (q.group) match.group = q.group;
-  if (q.component) match.component = q.component;
-  const [banks, counts] = await Promise.all([
-    Bank.find({ verified: true, ...(q.city ? { city: q.city } : {}) }, { license: 0 }).lean<Record<string, any>[]>(),
-    Batch.aggregate([{ $match: match }, { $group: { _id: { bankId: '$bankId', group: '$group', component: '$component' }, units: { $sum: 1 } } }]),
-  ]);
-  res.json({
-    banks: banks.map((b) => ({ ...toApi(b), stock: counts.filter((c) => c._id.bankId === b._id).map((c) => ({ group: c._id.group, component: c._id.component, units: c.units })) })),
-  });
-});
+/** Stock for the public "find blood" page and landing board: verified centres and in-date available units. */
+api.get('/public/snapshot', async (_req, res) => { res.json(await publicSnapshot()); });
 
 /* ---------- everything below needs a session ---------- */
 
@@ -71,26 +58,26 @@ const patient = z.object({ name: text(80), age: z.number().int().min(0).max(120)
 api.post('/orders', requireRole('user', 'referral'), async (req, res) => {
   const b = parse(z.object({
     id: z.string().regex(/^RK-\d{5,6}$/).optional(), kind: z.enum(['order', 'booking']), urgency: z.enum(['sos', 'routine']), patient,
-    group, component, units: z.number().int().min(1).max(10), bankId: id, scheduledFor: isoDate.optional(), seriesId: id.optional(),
-    fulfilment: z.enum(['collect', 'delivery']), rx: text(200), method: z.enum(['wallet', 'counter']), creditsToUse: z.number().int().min(0).max(10).default(0),
+    group, component, units: z.number().int().min(1).max(10), bankId: id, scheduledFor: isoDate.nullish().transform((v) => v ?? undefined), seriesId: id.optional(),
+    fulfilment: z.enum(['collect', 'delivery']), rx: text(200), rxFileId: id.optional(), method: z.enum(['wallet', 'counter']), creditsToUse: z.number().int().min(0).max(10).default(0),
   }), req.body);
-  res.status(201).json(toApi(await O.placeOrder(me(req), b)));
+  res.status(201).json((await O.placeOrder(me(req), b)));
 });
 api.get('/orders/:id', async (req, res) => {
   const o = await O.getOrder(param(req));
   O.assertCanSee(me(req), o);
-  res.json(toApi(o));
+  res.json((o));
 });
-api.post('/orders/:id/advance', requireRole('bank', 'admin'), async (req, res) => { res.json(toApi(await O.advanceOrder(me(req), param(req)))); });
+api.post('/orders/:id/advance', requireRole('bank', 'admin'), async (req, res) => { res.json((await O.advanceOrder(me(req), param(req)))); });
 const reason = z.object({ reason: text(300) });
 api.post('/orders/:id/reject', requireRole('bank', 'admin'), async (req, res) => {
-  res.json(toApi(await O.closeOrder(me(req), param(req), 'rejected', parse(reason, req.body).reason)));
+  res.json((await O.closeOrder(me(req), param(req), 'rejected', parse(reason, req.body).reason)));
 });
 api.post('/orders/:id/cancel', async (req, res) => {
-  res.json(toApi(await O.closeOrder(me(req), param(req), 'cancelled', parse(reason, req.body).reason)));
+  res.json((await O.closeOrder(me(req), param(req), 'cancelled', parse(reason, req.body).reason)));
 });
 api.post('/orders/:id/reaction', requireRole('user', 'referral'), async (req, res) => {
-  res.json(toApi(await O.reportReaction(me(req), param(req), parse(z.object({ text: text(1000) }), req.body).text)));
+  res.json((await O.reportReaction(me(req), param(req), parse(z.object({ text: text(1000) }), req.body).text)));
 });
 
 /* ---------- wallet ---------- */
@@ -108,24 +95,24 @@ api.post('/wallet/gift-credit', requireRole('user'), async (req, res) => {
 
 /* ---------- profile ---------- */
 
-api.get('/profile', requireRole('user'), async (req, res) => { res.json(toApi(await P.getProfile(me(req)))); });
+api.get('/profile', requireRole('user'), async (req, res) => { res.json((await P.getProfile(me(req)))); });
 api.patch('/profile', requireRole('user'), async (req, res) => {
   const patch = parse(z.object({
     name: z.string().trim().max(80), city: z.string().trim().max(60), group, age: z.number().int().min(0).max(120), weight: z.number().min(0).max(250),
     sex: z.enum(['F', 'M']), donorActive: z.boolean(), rareDonor: z.boolean(), shareContact: z.boolean(),
   }).partial().strict(), req.body);
-  res.json(toApi(await P.updateProfile(me(req), patch) as Record<string, unknown>));
+  res.json((await P.updateProfile(me(req), patch) as Record<string, unknown>));
 });
 api.post('/profile/family', requireRole('user'), async (req, res) => {
   const b = parse(z.object({ name: text(80), relation: text(40), group }), req.body);
-  res.status(201).json(toApi(await P.addFamily(me(req), b.name, b.relation, b.group) as Record<string, unknown>));
+  res.status(201).json((await P.addFamily(me(req), b.name, b.relation, b.group) as Record<string, unknown>));
 });
 
 /* ---------- donations ---------- */
 
 api.post('/donations', requireRole('user'), async (req, res) => {
   const b = parse(z.object({ id: id.optional(), bankId: id, date: isoDate, slot: text(20), campId: id.optional() }), req.body);
-  res.status(201).json(toApi(await P.bookDonation(me(req), b) as Record<string, unknown>));
+  res.status(201).json((await P.bookDonation(me(req), b) as Record<string, unknown>));
 });
 api.post('/donations/:id/cancel', requireRole('user'), async (req, res) => { await P.cancelDonation(me(req), param(req)); res.json(ok); });
 api.post('/donations/:id/record', requireRole('bank', 'admin'), async (req, res) => {
@@ -148,7 +135,7 @@ api.post('/stock/:id/transfer', requireRole('bank', 'admin'), async (req, res) =
 
 api.post('/camps', async (req, res) => {
   const b = parse(z.object({ org: text(120), venue: text(120), city: text(60), date: isoDate, target: z.number().int().min(1).max(5000), bankIds: z.array(id).min(1).max(50) }), req.body);
-  res.status(201).json(toApi(await C.requestCamp(me(req), b) as Record<string, unknown>));
+  res.status(201).json((await C.requestCamp(me(req), b) as Record<string, unknown>));
 });
 api.post('/camps/:id/respond', requireRole('bank', 'admin'), async (req, res) => {
   const b = parse(z.object({ status: z.enum(['accepted', 'declined', 'completed']), bankId: id.optional() }), req.body);
@@ -157,7 +144,7 @@ api.post('/camps/:id/respond', requireRole('bank', 'admin'), async (req, res) =>
 
 api.post('/requests', async (req, res) => {
   const b = parse(z.object({ group, units: z.number().int().min(1).max(20), hospital: text(120), city: text(60), neededBy: isoDate, note: z.string().max(500).default(''), feeSupport: z.boolean().default(false) }), req.body);
-  res.status(201).json(toApi(await C.postRequest(me(req), b) as Record<string, unknown>));
+  res.status(201).json((await C.postRequest(me(req), b) as Record<string, unknown>));
 });
 api.post('/requests/:id/respond', async (req, res) => { await C.respond(me(req), param(req)); res.json(ok); });
 api.post('/requests/:id/close', async (req, res) => { await C.closeRequest(me(req), param(req)); res.json(ok); });
@@ -177,22 +164,22 @@ api.post('/notices/read', async (req, res) => { await C.readNotices(me(req), me(
 
 api.post('/bank/centres', requireRole('bank'), async (req, res) => {
   const b = parse(z.object({ name: text(120), city: text(60), license: text(40) }), req.body);
-  res.status(201).json(toApi(await C.addCenter(me(req), b.name, b.city, b.license) as Record<string, unknown>));
+  res.status(201).json((await C.addCenter(me(req), b.name, b.city, b.license) as Record<string, unknown>));
 });
 api.post('/bank/referrals', requireRole('bank'), async (req, res) => {
   const b = parse(z.object({ name: text(120), kind: z.enum(['Hospital', 'Clinic', 'Doctor', 'Nursing home']), city: text(60), contact: text(80) }), req.body);
-  res.status(201).json(toApi(await C.addReferral(me(req), b.name, b.kind, b.city, b.contact) as Record<string, unknown>));
+  res.status(201).json((await C.addReferral(me(req), b.name, b.kind, b.city, b.contact) as Record<string, unknown>));
 });
 api.post('/bank/expenses', requireRole('bank'), async (req, res) => {
   const b = parse(z.object({ head: text(120), amount: money, bankId: id.optional() }), req.body);
-  res.status(201).json(toApi(await C.addExpense(me(req), b.head, b.amount, b.bankId) as Record<string, unknown>));
+  res.status(201).json((await C.addExpense(me(req), b.head, b.amount, b.bankId) as Record<string, unknown>));
 });
 
 /* ---------- regular transfusion plans ---------- */
 
 api.post('/plans', requireRole('user', 'referral'), async (req, res) => {
   const b = parse(z.object({ patient: text(80), group, component, units: z.number().int().min(1).max(10), everyDays: z.number().int().min(7).max(120), bankId: id, next: isoDate }), req.body);
-  res.status(201).json(toApi(await C.addPlan(me(req), b) as Record<string, unknown>));
+  res.status(201).json((await C.addPlan(me(req), b) as Record<string, unknown>));
 });
 api.post('/plans/:id/toggle', requireRole('user', 'referral'), async (req, res) => { await C.togglePlan(me(req), param(req)); res.json(ok); });
 
@@ -200,25 +187,37 @@ api.post('/plans/:id/toggle', requireRole('user', 'referral'), async (req, res) 
 
 api.post('/applications', requireRole('franchise'), async (req, res) => {
   const b = parse(z.object({ name: text(120), city: text(60), license: text(40), type: z.enum(['Government', 'Charitable', 'Private']).optional() }), req.body);
-  res.status(201).json(toApi(await C.submitApplication(me(req), b) as Record<string, unknown>));
+  res.status(201).json((await C.submitApplication(me(req), b) as Record<string, unknown>));
 });
 api.post('/applications/:id/decision', requireRole('admin'), async (req, res) => {
   await C.decideApplication(me(req), param(req), parse(z.object({ status: z.enum(['approved', 'rejected']) }), req.body).status); res.json(ok);
 });
 api.post('/leads', requireRole('franchise', 'admin'), async (req, res) => {
   const b = parse(z.object({ name: text(120), city: text(60), contact: text(80), plan: text(60) }), req.body);
-  res.status(201).json(toApi(await C.addLead(me(req), b) as Record<string, unknown>));
+  res.status(201).json((await C.addLead(me(req), b) as Record<string, unknown>));
 });
 api.patch('/leads/:id', requireRole('franchise', 'admin'), async (req, res) => {
   await C.moveLead(me(req), param(req), parse(z.object({ stage: z.enum(['Lead', 'Demo done', 'Documents', 'Live']) }), req.body).stage); res.json(ok);
 });
 api.post('/tickets', async (req, res) => {
-  res.status(201).json(toApi(await C.addTicket(me(req), parse(z.object({ subject: text(200) }), req.body).subject) as Record<string, unknown>));
+  res.status(201).json((await C.addTicket(me(req), parse(z.object({ subject: text(200) }), req.body).subject) as Record<string, unknown>));
 });
 api.post('/tickets/:id/resolve', requireRole('franchise', 'admin'), async (req, res) => { await C.resolveTicket(me(req), param(req)); res.json(ok); });
 
-/** Restores the sample data. Only when ALLOW_DEMO_RESET is on. */
-api.post('/admin/reset', async (_req, res) => {
+/* ---------- prescription files ---------- */
+
+api.post('/files', requireRole('user', 'referral'), async (req, res) => {
+  const b = parse(z.object({ name: text(120), mime: text(60), data: z.string().min(1).max(4_500_000) }), req.body);
+  res.status(201).json(await P.saveFile(me(req), b.name, b.mime, b.data));
+});
+api.get('/files/:id', async (req, res) => {
+  const f = await P.readFile(me(req), param(req));
+  res.set({ 'Content-Type': f.mime, 'Content-Disposition': `inline; filename="${encodeURIComponent(f.name)}"`, 'Cache-Control': 'private, max-age=300' });
+  res.send(f.data);
+});
+
+/** Restores the sample data. Admin only, and only when ALLOW_DEMO_RESET is on. */
+api.post('/admin/reset', requireRole('admin'), async (_req, res) => {
   if (!config.allowReset) throw forbidden('Reset is turned off on this server');
   res.json(await seedDatabase());
 });

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import '@fontsource-variable/bricolage-grotesque';
 import '@fontsource-variable/inter';
 import './styles/app.css';
+import './styles/portal.css';
 import App from './App';
 
 try {

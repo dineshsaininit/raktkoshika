@@ -24,7 +24,8 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message, details: err.details });
   if (err instanceof ZodError) return void res.status(400).json({ error: 'Invalid input', details: err.issues });
   if (err?.type === 'entity.parse.failed') return void res.status(400).json({ error: 'Body is not valid JSON' });
-  if (err?.code === 11000) return void res.status(409).json({ error: 'That record already exists' });
+  if (err?.code === '23505') return void res.status(409).json({ error: 'That record already exists' });
+  if (err?.code === '23514') return void res.status(409).json({ error: 'That would make a balance or count negative' });
   console.error('[api] unhandled', err);
   res.status(500).json({ error: 'Something went wrong on the server' });
 };

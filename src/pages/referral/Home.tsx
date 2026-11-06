@@ -8,7 +8,7 @@ import { isOpen, OrderRow } from '../shared/Orders';
 
 export function ReferralHome() {
   const { db } = useStore();
-  const { me, base } = useRole();
+  const { me, base, persona } = useRole();
   const orders = db.orders.filter((o) => o.ownerId === me);
   const open = orders.filter(isOpen);
   const w = db.wallets[me];
@@ -18,7 +18,7 @@ export function ReferralHome() {
 
   return (
     <>
-      <PageHead title="Sanjeevani Hospital" sub="Blood for your patients, without the phone calls.">
+      <PageHead title={persona.org} sub="Blood for your patients, without the phone calls.">
         <Link className="btn" to={`${base}/order?mode=schedule`}><Repeat size={16} /> Schedule</Link>
         <Link className="btn primary" to={`${base}/order`}><Plus size={17} /> Order for a patient</Link>
       </PageHead>

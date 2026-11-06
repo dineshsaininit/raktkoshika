@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { BloodGroup, Camp, Component, DB, DonorRequest, LeadStage, Notice, Order, Role, Stage, Wallet } from '../data/types';
 import { COMPONENTS, MIN_HB, processingFee, uid } from '../data/rules';
 import { makeSeed } from '../data/seed';
-import { apiMode, call, ensureSession, fetchDb, subscribe } from '../api/client';
+import { apiMode, call, fetchDb, fetchPublic, logout, SignedOut, subscribe, selectSession } from '../api/client';
 
 const KEY = 'raktkoshika-demo-v1';
 const load = (): DB => {
@@ -14,7 +14,7 @@ const now = () => new Date().toISOString();
 export interface NewOrder {
   ownerId: string; actor: string; kind: 'order' | 'booking'; urgency: 'sos' | 'routine'; patient: Order['patient'];
   group: BloodGroup; component: Component; units: number; bankId: string; scheduledFor?: string; fulfilment: 'collect' | 'delivery';
-  rx: string; method: 'wallet' | 'counter'; creditsToUse: number; seriesId?: string;
+  rx: string; rxFileId?: string; method: 'wallet' | 'counter'; creditsToUse: number; seriesId?: string;
 }
 
 function ledger(w: Wallet, kind: Wallet['ledger'][number]['kind'], amount: number, credits: number, note: string, ref?: string) {
@@ -65,7 +65,7 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
         }
         d.orders.unshift({
           id, ownerId: input.ownerId, kind: input.kind, urgency: input.urgency, patient: input.patient, group: input.group, component: input.component,
-          units: input.units, bankId: input.bankId, scheduledFor: input.scheduledFor, seriesId: input.seriesId, fulfilment: input.fulfilment, rx: input.rx, stage: 'placed',
+          units: input.units, bankId: input.bankId, scheduledFor: input.scheduledFor, seriesId: input.seriesId, fulfilment: input.fulfilment, rx: input.rx, rxFileId: input.rxFileId, stage: 'placed',
           events: [{ stage: 'placed', at: now() }], payment: { method: input.method, fee, total: fee * input.units, creditsUsed, cash, settled: false },
         });
         notify(d, 'bank', `${input.urgency === 'sos' ? 'SOS: ' : ''}${input.units} unit${input.units > 1 ? 's' : ''} ${input.group} ${COMPONENTS[input.component].short}`, `${input.patient.hospital} · ${id}`, input.urgency === 'sos' ? 'crit' : 'info', 'requests');
@@ -360,13 +360,29 @@ const remote: Remote = {
   addTicket: (_r, _from, subject) => call('POST', '/tickets', { subject }),
 };
 
-export type SyncState = { mode: 'local' } | { mode: 'api'; status: 'connecting' | 'ready' | 'error'; error?: string };
-interface StoreValue { db: DB; act: Actions; sync: SyncState; connect: (role: Role) => void }
+export type SyncState =
+  | { mode: 'local' }
+  | { mode: 'api'; status: 'connecting' | 'ready' | 'offline' | 'signedout'; error?: string; role?: Role };
+
+interface StoreValue {
+  db: DB; act: Actions; sync: SyncState;
+  /** Signs a portal in to the server and loads its data. */
+  connect: (role: Role) => void;
+  /** Loads public stock for the website and "Find blood", without signing in. */
+  loadPublic: () => void;
+  /** Runs an action and waits for the server to accept it. Rejects with the server's message if it does not. */
+  confirm: <K extends keyof Actions>(k: K, ...args: Parameters<Actions[K]>) => Promise<ReturnType<Actions[K]>>;
+  signOut: (role: Role) => void;
+  /** The last write the server refused, shown once to the person. */
+  writeError: string | null;
+  clearWriteError: () => void;
+}
 const Ctx = createContext<StoreValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [db, setState] = useState<DB>(load);
   const [sync, setSync] = useState<SyncState>(apiMode ? { mode: 'api', status: 'connecting' } : { mode: 'local' });
+  const [writeError, setWriteError] = useState<string | null>(null);
   const latest = useRef(db);
   const setDb = useCallback((fn: (d: DB) => void) => {
     const next = structuredClone(latest.current);
@@ -377,31 +393,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ---- API mode: the server is the source of truth; local actions only paint the change instantly. ----
-  const refresh = useCallback(async () => {
-    const next = await fetchDb();
-    latest.current = next; setState(next);
-    setSync((s) => (s.mode === 'api' && s.status === 'connecting' ? { mode: 'api', status: 'ready' } : s));
-  }, []);
-  const fail = useCallback((e: unknown) => {
-    const error = e instanceof Error ? e.message : String(e);
-    console.error('[api]', e);
-    setSync({ mode: 'api', status: 'error', error });
-  }, []);
   const connected = useRef<Role | null>(null);
   const unsub = useRef<() => void>(() => {});
+  const onFailure = useCallback((e: unknown) => {
+    if (e instanceof SignedOut) {
+      connected.current = null; unsub.current();
+      setSync({ mode: 'api', status: 'signedout', role: e.role });
+      return;
+    }
+    console.error('[api]', e);
+    setSync((s) => ({ mode: 'api', status: 'offline', error: e instanceof Error ? e.message : String(e), role: s.mode === 'api' ? s.role : undefined }));
+  }, []);
+  const refresh = useCallback(async () => {
+    const role = connected.current;
+    const next = await fetchDb();
+    if (connected.current !== role) return; // switched portal while this was loading
+    latest.current = next; setState(next);
+    setSync({ mode: 'api', status: 'ready', role: role ?? undefined });
+  }, []);
+
   const connect = useCallback((role: Role) => {
     if (!apiMode || connected.current === role) return;
-    connected.current = role;
-    setSync({ mode: 'api', status: 'connecting' });
     unsub.current();
-    ensureSession(role).then(refresh).then(() => {
+    try { selectSession(role); } catch (e) { onFailure(e); return; }
+    connected.current = role;
+    setSync({ mode: 'api', status: 'connecting', role });
+    refresh().then(() => {
       let t: ReturnType<typeof setTimeout> | undefined;
-      unsub.current = subscribe(() => { clearTimeout(t); t = setTimeout(() => { refresh().catch(fail); }, 150); });
-    }).catch(fail);
-  }, [refresh, fail]);
+      unsub.current = subscribe(() => { clearTimeout(t); t = setTimeout(() => { refresh().catch(onFailure); }, 150); });
+    }).catch(onFailure);
+  }, [refresh, onFailure]);
   useEffect(() => () => unsub.current(), []);
 
-  // ---- Local mode: keeps portals open in separate tabs in step, which is the core of the live demo. ----
+  const loadPublic = useCallback(() => {
+    if (!apiMode || connected.current) return;
+    fetchPublic().then((p) => setDb((d) => { d.banks = p.banks; d.batches = p.batches; })).catch((e) => console.warn('[api] public stock', e));
+  }, [setDb]);
+
+  const signOut = useCallback((role: Role) => {
+    logout(role);
+    if (connected.current === role) { connected.current = null; unsub.current(); }
+    if (apiMode) setSync({ mode: 'api', status: 'signedout', role });
+  }, []);
+
+  // ---- Local mode: keeps portals open in separate tabs in step. ----
   useEffect(() => {
     if (apiMode) return;
     const onStorage = (e: StorageEvent) => {
@@ -412,23 +447,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const local = useActions(setDb);
+  const sendRemote = useCallback(async (k: keyof Actions, result: unknown, args: unknown[]) => {
+    const send = remote[k] as ((r: unknown, ...a: unknown[]) => Promise<unknown>) | undefined;
+    try {
+      await send?.(result, ...args);
+    } finally {
+      // A refused write (no stock, low balance, no permission) is undone by reloading the server's copy.
+      await refresh().catch(onFailure);
+    }
+  }, [refresh, onFailure]);
+
   const act = useMemo(() => {
     if (!apiMode) return local;
     const wrapped = {} as Record<string, (...a: unknown[]) => unknown>;
     for (const k of Object.keys(local) as (keyof Actions)[]) {
       const fn = local[k] as (...a: unknown[]) => unknown;
-      const send = remote[k] as ((r: unknown, ...a: unknown[]) => Promise<unknown>) | undefined;
       wrapped[k] = (...args: unknown[]) => {
         const result = fn(...args);
-        // A rejected write (no stock, low balance, no permission) is undone by reloading the server's copy.
-        send?.(result, ...args).then(() => setSync({ mode: 'api', status: 'ready' }), fail).finally(() => { refresh().catch(fail); });
+        sendRemote(k, result, args).catch((e) => {
+          if (e instanceof SignedOut) onFailure(e);
+          else setWriteError(e instanceof Error ? e.message : String(e));
+        });
         return result;
       };
     }
     return wrapped as unknown as Actions;
-  }, [local, refresh, fail]);
+  }, [local, sendRemote, onFailure]);
 
-  const value = useMemo(() => ({ db, act, sync, connect }), [db, act, sync, connect]);
+  const confirm = useCallback(async <K extends keyof Actions>(k: K, ...args: Parameters<Actions[K]>) => {
+    const fn = local[k] as (...a: unknown[]) => ReturnType<Actions[K]>;
+    const result = fn(...args);
+    if (apiMode) {
+      try { await sendRemote(k, result, args); } catch (e) { if (e instanceof SignedOut) onFailure(e); throw e; }
+    }
+    return result;
+  }, [local, sendRemote, onFailure]);
+
+  const clearWriteError = useCallback(() => setWriteError(null), []);
+  const value = useMemo(() => ({ db, act, sync, connect, loadPublic, confirm, signOut, writeError, clearWriteError }),
+    [db, act, sync, connect, loadPublic, confirm, signOut, writeError, clearWriteError]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() {

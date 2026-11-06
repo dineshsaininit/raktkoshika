@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Check, ClipboardList, FileText, MessagesSquare, Plus, Printer, Truck, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, ClipboardList, MessagesSquare, Plus, Printer, Truck, X } from 'lucide-react';
 import { COMPONENTS, fmtDT, fmtShort, inr, stageIndex, stageLabel, STAGES } from '../../data/rules';
 import type { Order } from '../../data/types';
 import { useStore } from '../../store/store';
+import { RxLink } from '../../ui/RxLink';
 import { useRole } from '../../layouts/Shell';
 import { Badge, Empty, Field, gl, GroupTag, Modal, Notice, PageHead, Tabs, useToast } from '../../ui/kit';
 
@@ -131,7 +132,7 @@ export function OrderDetail() {
               <div className="row between top"><span className="muted">Hospital</span><span className="right">{o.patient.hospital}{o.patient.ward !== 'Not specified' ? `, ${o.patient.ward}` : ''}</span></div>
               <div className="row between"><span className="muted">Doctor</span><span>{o.patient.doctor}</span></div>
               <div className="row between"><span className="muted">Handover</span><span className="row" style={{ gap: 5 }}>{o.fulfilment === 'delivery' && <Truck size={14} />}{o.fulfilment === 'delivery' ? 'Cold-chain rider' : 'Attendant collects'}</span></div>
-              <div className="row between"><span className="muted">Prescription</span><span className="row" style={{ gap: 5 }}><FileText size={14} />{o.rx}</span></div>
+              <div className="row between"><span className="muted">Prescription</span><RxLink name={o.rx} fileId={o.rxFileId} /></div>
               {o.scheduledFor && <div className="row between"><span className="muted">Needed on</span><span>{fmtDT(o.scheduledFor)}</span></div>}
               <div className="row between"><span className="muted">Placed</span><span>{fmtShort(o.events[0].at)}</span></div>
             </div>

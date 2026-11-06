@@ -1,0 +1,35 @@
+# Render Blueprint: one free web service that serves both the website and the API.
+# In Render: New > Blueprint, pick this repository, then paste DATABASE_URL when asked.
+services:
+  - type: web
+    name: raktkoshika
+    runtime: node
+    plan: free
+    # Same region as the Neon database (ap-southeast-1), so each query is a few milliseconds.
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build && npm ci --prefix server --omit=dev
+    startCommand: npm start --prefix server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Build the website to call the API on the same address.
+      - key: VITE_API_URL
+        value: same-origin
+      # Your Neon connection string. Entered in the Render dashboard, never committed.
+      - key: DATABASE_URL
+        sync: false
+      # Signs login sessions. Render generates a long random value.
+      - key: JWT_SECRET
+        generateValue: true
+      # Lets the admin account restore the sample data from the portal. Set to false for real data.
+      - key: ALLOW_DEMO_RESET
+        value: "true"
+      # Shows the sample logins on the sign-in page. Set to false for real data.
+      - key: VITE_SHOW_DEMO_LOGINS
+        value: "true"
+      # RENDER_EXTERNAL_URL is set by Render; the server uses it to ping itself every 14 minutes.
+      - key: KEEP_ALIVE_MINUTES
+        value: "14"

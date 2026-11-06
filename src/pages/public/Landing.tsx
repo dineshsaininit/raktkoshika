@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertOctagon, ArrowRight, BadgeCheck, BellRing, Building2, CalendarClock, Check, FileBarChart2, HandHeart, Lock, Search, ShieldCheck, Stethoscope, Store, Thermometer, UserCircle2, Wallet, X, Droplets } from 'lucide-react';
 import { COMPONENTS, COMPONENT_KEYS, GROUPS, inr } from '../../data/rules';
@@ -7,7 +7,8 @@ import { useStore } from '../../store/store';
 import { BagGauge, gl, Logo } from '../../ui/kit';
 
 function LiveBoard() {
-  const { db } = useStore();
+  const { db, loadPublic } = useStore();
+  useEffect(() => { loadPublic(); }, [loadPublic]);
   const districts = useMemo(() => Array.from(new Set(db.banks.map((b) => b.district))), [db.banks]);
   const [district, setDistrict] = useState('Sangli');
   const [comp, setComp] = useState<Component>('PRBC');
@@ -19,7 +20,7 @@ function LiveBoard() {
       <div className="row between wrap">
         <div>
           <div style={{ font: '700 17px var(--display)' }}>Available right now</div>
-          <div className="xs" style={{ color: '#AEB9C6' }}>{ids.length} verified centre{ids.length > 1 ? 's' : ''} · sample data</div>
+          <div className="xs" style={{ color: '#AEB9C6' }}>{ids.length} verified centre{ids.length === 1 ? '' : 's'} · sample data</div>
         </div>
         <div className="row">
           <select className="select" aria-label="District" value={district} onChange={(e) => setDistrict(e.target.value)}>{districts.map((d) => <option key={d}>{d}</option>)}</select>
@@ -70,7 +71,7 @@ export default function Landing() {
       <header className="nav-pub">
         <Logo size={32} sub />
         <ul><li><a href="#how">How it works</a></li><li><a href="#wallet">Wallet</a></li><li><a href="#who">Who it serves</a></li><li><a href="#trust">Trust</a></li></ul>
-        <Link to="/login" className="btn sm" style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.25)' }}>Open demo</Link>
+        <Link to="/login" className="btn sm" style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.25)' }}>Sign in</Link>
       </header>
 
       <section className="hero">

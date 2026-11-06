@@ -3,7 +3,7 @@ import { Building2, CheckCircle2, Download, FileBarChart2, HeartPulse, Plus, Pri
 import { COMPONENTS, downloadCsv, fmtDate, inr } from '../../data/rules';
 import type { Referral } from '../../data/types';
 import { useStore } from '../../store/store';
-import { useRole } from '../../layouts/Shell';
+import { myCentres, useRole } from '../../layouts/Shell';
 import { Badge, BarChart, Empty, Field, Modal, Notice, PageHead, Stat, Tabs, useToast } from '../../ui/kit';
 
 /* ---------- quality ---------- */
@@ -61,6 +61,7 @@ export function BankReports() {
   const { me } = useRole();
   const toast = useToast();
   const [active, setActive] = useState<ReportKey>('master');
+  const centre = db.banks.find((b) => b.id === me);
   const orders = db.orders.filter((o) => o.bankId === me);
   const units = db.batches.filter((u) => u.bankId === me);
 
@@ -90,7 +91,7 @@ export function BankReports() {
       </div>
       <section className="card">
         <div className="card-head wrap" style={{ flexWrap: 'wrap' }}>
-          <div><h3>{meta.t}</h3><div className="xs faint">Krishna Valley Blood Centre · licence MH/BB/SGL/0142 · {table.length - 1} rows</div></div>
+          <div><h3>{meta.t}</h3><div className="xs faint">{centre?.name} · licence {centre?.license} · {table.length - 1} rows</div></div>
           <div className="row">
             <button className="btn sm" onClick={() => window.print()}><Printer size={14} /> Print</button>
             <button className="btn sm primary" onClick={() => { downloadCsv(`${active}-register.csv`, table); toast(`${meta.t} downloaded`); }}><Download size={14} /> Download</button>
@@ -115,7 +116,8 @@ export function BankReferrals() {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ name: '', kind: 'Hospital' as Referral['kind'], city: '', contact: '' });
-  const list = db.referrals.filter((r) => r.bankId === 'b1');
+  const { me } = useRole();
+  const list = db.referrals.filter((r) => myCentres(db.banks, me).includes(r.bankId));
   const total = list.reduce((s, r) => s + r.units, 0);
   return (
     <>
@@ -159,7 +161,8 @@ export function BankCentres() {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ name: '', city: '', license: '' });
-  const list = db.banks.filter((b) => b.id === 'b1' || b.parentId === 'b1');
+  const { me } = useRole();
+  const list = db.banks.filter((b) => b.id === me || b.parentId === me);
   return (
     <>
       <PageHead title="Centres" sub="Run several centres under one login. Each keeps its own licence, stock and staff.">
@@ -203,11 +206,13 @@ export function BankAccounts() {
   const [tab, setTab] = useState<'ledger' | 'sheet'>('ledger');
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ head: '', amount: '' });
-  const entries = db.accounts.filter((a) => a.bankId === 'b1');
+  const { me } = useRole();
+  const centres = myCentres(db.banks, me);
+  const entries = db.accounts.filter((a) => centres.includes(a.bankId));
   const income = entries.filter((e) => e.kind === 'income').reduce((s, e) => s + e.amount, 0);
   const expense = entries.filter((e) => e.kind === 'expense').reduce((s, e) => s + e.amount, 0);
-  const wallet = db.wallets.b1.balance;
-  const stockValue = db.batches.filter((u) => u.bankId === 'b1' && u.status === 'available').length * 620;
+  const wallet = db.wallets[me]?.balance ?? 0;
+  const stockValue = db.batches.filter((u) => centres.includes(u.bankId) && u.status === 'available').length * 620;
   const assets = [['Raktkoshika wallet balance', wallet], ['Consumables and kits in store (sample)', 88000], ['Blood stock at collection cost (sample)', stockValue], ['Equipment, net of depreciation (sample)', 1240000]] as const;
   const liabilities = [['Supplier dues (sample)', 46500], ['Staff and statutory dues (sample)', 31200]] as const;
   const totalA = assets.reduce((s, a) => s + a[1], 0);

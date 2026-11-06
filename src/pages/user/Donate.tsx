@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Check, ClipboardCheck, HandHeart, MapPin, X } from 'lucide-react';
 import { daysUntilEligible, DONATION_GAP, fmtDate, MIN_HB, nextEligibleDate } from '../../data/rules';
+import { useRole } from '../../layouts/Shell';
 import { useStore } from '../../store/store';
 import { Badge, Empty, Field, gl, Modal, Notice, PageHead, useToast } from '../../ui/kit';
 
@@ -24,10 +25,11 @@ export function Donate() {
   const [quiz, setQuiz] = useState(false);
   const [answers, setAnswers] = useState<Record<number, boolean>>({});
   const [passed, setPassed] = useState(false);
-  const [bankId, setBankId] = useState('b1');
+  const { me } = useRole();
+  const [bankId, setBankId] = useState(() => db.banks.find((b) => b.verified)?.id ?? '');
   const [date, setDate] = useState(inDays(1));
   const [slot, setSlot] = useState('10:30 am');
-  const mine = db.donations.filter((d) => d.donorId === 'u1');
+  const mine = db.donations.filter((d) => d.donorId === me);
   const booked = mine.filter((d) => d.status === 'booked');
   const allYes = QUESTIONS.every((_, i) => answers[i] === true);
   const anyNo = Object.values(answers).some((v) => v === false);

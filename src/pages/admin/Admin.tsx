@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Activity, AlertTriangle, ArrowRight, Building2, Check, CircleCheck, CircleDashed, Clock, Droplets, FileCheck2, Megaphone, ReceiptIndianRupee, Scale, Search, ShieldCheck, Users, Wallet, X } from 'lucide-react';
 import { ago, COMPONENTS, COMPONENT_KEYS, daysLeft, downloadCsv, FEES, fmtDT, GROUPS, inr } from '../../data/rules';
 import type { BloodGroup, Component } from '../../data/types';
-import { PERSONA } from '../../data/seed';
+import { DEMO_ACCOUNTS } from '../../data/demoAccounts';
 import { useStore } from '../../store/store';
 import { useRole } from '../../layouts/Shell';
 import { Badge, Empty, gl, LineChart, Notice, PageHead, Stat, Tabs, useToast } from '../../ui/kit';
@@ -125,7 +125,7 @@ export function AdminVerification() {
   );
 }
 
-const OWNER_NAME: Record<string, string> = { u1: PERSONA.user.name, r1: 'Sanjeevani Hospital', r9: 'Lifeline Clinic', b1: 'Krishna Valley', f1: 'South Maharashtra franchise', a1: 'Raktkoshika' };
+const OWNER_NAME: Record<string, string> = Object.fromEntries(DEMO_ACCOUNTS.map((a) => [a.id, a.role === 'user' ? a.name : a.org]));
 
 export function AdminLedger() {
   const { db } = useStore();

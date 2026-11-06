@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowRight, Check, ClipboardCheck, Droplets, FileText, M
 import { COMPONENTS, COMPONENT_KEYS, daysLeft, fmtDate, fmtDT, GROUPS, inr, MIN_HB, stageIndex, stageLabel, STAGES } from '../../data/rules';
 import type { BloodGroup, Component, Order } from '../../data/types';
 import { useStore } from '../../store/store';
+import { RxLink } from '../../ui/RxLink';
 import { useRole } from '../../layouts/Shell';
 import { BagGauge, Badge, Empty, Field, GroupPicker, gl, GroupTag, LineChart, Modal, Notice, PageHead, Stat, Tabs, useToast } from '../../ui/kit';
 import { isOpen, MiniTrack } from '../shared/Orders';
@@ -32,7 +33,7 @@ export function BankHome() {
 
   return (
     <>
-      <PageHead title="Today at Krishna Valley" sub={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}>
+      <PageHead title={`Today at ${db.banks.find((b) => b.id === me)?.name.replace(/ Blood Centre$/, '') ?? 'your centre'}`} sub={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}>
         <Link className="btn" to={`${base}/reports`}><FileText size={16} /> Reports</Link>
         <Link className="btn primary" to={`${base}/requests`}>Open requests <ArrowRight size={16} /></Link>
       </PageHead>
@@ -173,7 +174,7 @@ export function BankRequests() {
             <div className="row between"><span className="muted">In stock now</span><b>{stockFor(fresh)} units</b></div>
             <div className="row between top"><span className="muted">Hospital</span><span className="right">{fresh.patient.hospital}, {fresh.patient.ward}</span></div>
             <div className="row between"><span className="muted">Doctor</span><span>{fresh.patient.doctor}</span></div>
-            <div className="row between"><span className="muted">Prescription</span><span className="row" style={{ gap: 5 }}><FileText size={14} /> {fresh.rx}</span></div>
+            <div className="row between"><span className="muted">Prescription</span><RxLink name={fresh.rx} fileId={fresh.rxFileId} /></div>
             <div className="row between"><span className="muted">Handover</span><span className="row" style={{ gap: 5 }}>{fresh.fulfilment === 'delivery' ? <><Truck size={14} /> Cold-chain rider</> : 'Attendant collects'}</span></div>
             <div className="row between"><span className="muted">Payment</span><span>{inr(fresh.payment.total)} {fresh.payment.creditsUsed ? `(${fresh.payment.creditsUsed} credit used)` : ''}</span></div>
             {db.batches.some((u) => u.orderId === fresh.id) && <div className="row between"><span className="muted">Allocated units</span><span className="num strong">{db.batches.filter((u) => u.orderId === fresh.id).map((u) => u.id).join(', ')}</span></div>}
