@@ -17,7 +17,7 @@ export function DonorRequests() {
   const toast = useToast();
   const [compose, setCompose] = useState(false);
   const [mineOnly, setMineOnly] = useState(false);
-  const [form, setForm] = useState({ group: 'O+' as BloodGroup, units: 1, hospital: role === 'referral' ? 'Sanjeevani Hospital, Miraj' : '', city: 'Sangli', note: '', feeSupport: false, neededIn: 1 });
+  const [form, setForm] = useState({ group: 'O+' as BloodGroup, units: 1, hospital: role === 'referral' ? persona.org : '', city: 'Sangli', note: '', feeSupport: false, neededIn: 1 });
   const donor = db.profile;
   const wait = daysUntilEligible(donor);
   const list = db.requests.filter((r) => r.status === 'open' && (!mineOnly || compatibleDonors(r.group, 'PRBC').includes(donor.group)));
@@ -101,7 +101,7 @@ export function CampsPage() {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const isBank = role === 'bank';
-  const [form, setForm] = useState({ org: role === 'referral' ? 'Sanjeevani Hospital' : '', venue: '', city: 'Sangli', date: dateIn(14), target: 50, all: true, bankId: 'b1' });
+  const [form, setForm] = useState({ org: role === 'referral' ? persona.org : '', venue: '', city: 'Sangli', date: dateIn(14), target: 50, all: true, bankId: 'b1' });
   const camps = db.camps.filter((c) => c.status !== 'declined');
   const registered = (id: string) => db.donations.some((d) => d.campId === id && d.donorId === me && d.status === 'booked');
 

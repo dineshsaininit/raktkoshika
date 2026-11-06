@@ -18,7 +18,7 @@ export interface Order {
   id: string; ownerId: string; kind: 'order' | 'booking'; urgency: 'sos' | 'routine';
   patient: { name: string; age: number; hospital: string; ward: string; doctor: string };
   group: BloodGroup; component: Component; units: number; bankId: string; scheduledFor?: string; seriesId?: string;
-  fulfilment: 'collect' | 'delivery'; rx: string; stage: Stage; events: OrderEvent[];
+  fulfilment: 'collect' | 'delivery'; rx: string; rxFileId?: string; stage: Stage; events: OrderEvent[];
   payment: { method: 'wallet' | 'counter'; fee: number; total: number; creditsUsed: number; cash: number; settled: boolean };
   reaction?: string;
 }

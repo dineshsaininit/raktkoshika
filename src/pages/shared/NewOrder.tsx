@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertOctagon, ArrowLeft, ArrowRight, CalendarPlus, Check, FileUp, MapPin, Phone, Trash2, Truck, Wallet } from 'lucide-react';
 import { compatibleDonors, COMPONENTS, COMPONENT_KEYS, fmtDT, inr, processingFee } from '../../data/rules';
 import type { BloodGroup, Component } from '../../data/types';
+import { apiMode, uploadFile } from '../../api/client';
 import { useStore } from '../../store/store';
 import { useRole } from '../../layouts/Shell';
 import { Badge, Field, GroupPicker, gl, GroupTag, Modal, Notice, PageHead, useToast } from '../../ui/kit';
@@ -18,14 +19,14 @@ const STEP_NAMES = ['What is needed', 'Patient & prescription', 'Blood centre', 
 const defaultWhen = (d = 1) => { const x = new Date(Date.now() + d * 864e5); x.setHours(10, 0, 0, 0); return new Date(x.getTime() - x.getTimezoneOffset() * 6e4).toISOString().slice(0, 16); };
 
 export function NewOrder() {
-  const { db, act } = useStore();
+  const { db, act, confirm } = useStore();
   const { role, me, base, persona } = useRole();
   const navigate = useNavigate();
   const toast = useToast();
   const [params] = useSearchParams();
   const sos = params.get('mode') === 'sos';
   const wallet = db.wallets[me] ?? { balance: 0, credits: 0 };
-  const hospitalDefault = role === 'referral' ? 'Sanjeevani Hospital, Miraj' : '';
+  const hospitalDefault = role === 'referral' ? persona.org : '';
 
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<Mode>((params.get('mode') as Mode) === 'schedule' ? 'schedule' : (params.get('mode') as Mode) === 'book' ? 'book' : 'now');
@@ -35,6 +36,11 @@ export function NewOrder() {
   const [dates, setDates] = useState<string[]>([defaultWhen()]);
   const [patient, setPatient] = useState({ name: '', age: '', hospital: hospitalDefault, ward: '', doctor: role === 'referral' ? persona.name : '' });
   const [rx, setRx] = useState('');
+  const [rxFileId, setRxFileId] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [fileError, setFileError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [bankId, setBankId] = useState(params.get('bank') ?? '');
   const [fulfilment, setFulfilment] = useState<'collect' | 'delivery'>('collect');
   const [method, setMethod] = useState<'wallet' | 'counter'>('wallet');
@@ -59,19 +65,43 @@ export function NewOrder() {
     !short,
   ];
 
-  const submit = () => {
-    if (!bank) return;
+  /** Uploads the prescription to the server (API mode) or just remembers its name (browser-only demo). */
+  const attach = async (file: File | undefined) => {
+    if (!file) return;
+    setFileError('');
+    if (!apiMode) { setRx(file.name); return; }
+    setUploading(true);
+    try {
+      const f = await uploadFile(file);
+      setRx(f.name); setRxFileId(f.id);
+    } catch (e) {
+      setFileError(e instanceof Error ? e.message : 'Upload failed');
+    } finally { setUploading(false); }
+  };
+  const sampleFile = () => attach(new File(['%PDF-1.4\n% Sample prescription for testing Raktkoshika\n'], 'sample-prescription.pdf', { type: 'application/pdf' }));
+
+  const submit = async () => {
+    if (!bank || busy) return;
+    setBusy(true); setSubmitError('');
     let left = creditsApplied;
     const whens = mode === 'now' ? [undefined] : mode === 'book' ? [dates[0]] : dates;
-    const ids = whens.map((when) => {
-      const use = Math.min(left, units); left -= use;
-      return act.placeOrder({
-        ownerId: me, actor: persona.org, kind: mode === 'book' ? 'booking' : 'order', urgency: sos ? 'sos' : 'routine',
-        patient: { name: patient.name, age: Number(patient.age) || 0, hospital: patient.hospital, ward: patient.ward || 'Not specified', doctor: patient.doctor },
-        group, component: comp, units, bankId: bank.id, scheduledFor: when ? new Date(when).toISOString() : undefined,
-        fulfilment, rx, method, creditsToUse: use,
-      });
-    });
+    const ids: string[] = [];
+    try {
+      // One after another, so the wallet hold for each date is checked against the money really left.
+      for (const when of whens) {
+        const use = Math.min(left, units); left -= use;
+        ids.push(await confirm('placeOrder', {
+          ownerId: me, actor: persona.org, kind: mode === 'book' ? 'booking' : 'order', urgency: sos ? 'sos' : 'routine',
+          patient: { name: patient.name, age: Number(patient.age) || 0, hospital: patient.hospital, ward: patient.ward || 'Not specified', doctor: patient.doctor },
+          group, component: comp, units, bankId: bank.id, scheduledFor: when ? new Date(when).toISOString() : undefined,
+          fulfilment, rx, rxFileId: rxFileId || undefined, method, creditsToUse: use,
+        }));
+      }
+    } catch (e) {
+      setBusy(false);
+      setSubmitError(`${ids.length ? `${ids.length} of ${whens.length} orders were placed. ` : ''}${e instanceof Error ? e.message : 'The server did not accept the request.'}`);
+      return;
+    }
     toast(ids.length > 1 ? `${ids.length} scheduled orders placed` : `Request ${ids[0]} sent to ${bank.name}`);
     navigate(ids.length > 1 ? `${base}/orders` : `${base}/orders/${ids[0]}`);
   };
@@ -138,12 +168,13 @@ export function NewOrder() {
             </div>
             <div className="field">
               <span className="label">Doctor’s prescription or blood request form</span>
-              <label className="choice" style={{ cursor: 'pointer', borderStyle: rx ? 'solid' : 'dashed', alignItems: 'center' }}>
+              <label className="choice" style={{ cursor: uploading ? 'wait' : 'pointer', borderStyle: rx ? 'solid' : 'dashed', alignItems: 'center', position: 'relative' }}>
                 {rx ? <Check size={20} color="var(--good)" /> : <FileUp size={20} className="brand-text" />}
-                <span className="grow"><b>{rx || 'Upload a photo or PDF'}</b><span className="xs muted" style={{ display: 'block' }}>Centres cannot issue blood without it.</span></span>
-                <input type="file" accept="image/*,.pdf" style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }} onChange={(e) => setRx(e.target.files?.[0]?.name ?? '')} />
+                <span className="grow"><b>{uploading ? 'Uploading…' : rx || 'Upload a photo or PDF'}</b><span className="xs muted" style={{ display: 'block' }}>{rx ? (apiMode ? 'Saved securely. Only the blood centre you choose can open it.' : 'Attached') : 'Up to 3 MB. Centres cannot issue blood without it.'}</span></span>
+                <input type="file" accept="image/*,.pdf" disabled={uploading} style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }} onChange={(e) => attach(e.target.files?.[0])} />
               </label>
-              <button className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setRx('sample-prescription.pdf')}>Use a sample file for this demo</button>
+              {fileError && <Notice tone="warn">{fileError}</Notice>}
+              <button className="link" style={{ alignSelf: 'flex-start' }} disabled={uploading} onClick={sampleFile}>Use a sample file for testing</button>
             </div>
           </>
         )}
@@ -219,11 +250,12 @@ export function NewOrder() {
           </>
         )}
 
+        {submitError && <div role="alert"><Notice tone="warn"><b>The request was not placed.</b> {submitError}</Notice></div>}
         <div className="row between">
           {step > 0 ? <button className="btn" onClick={() => setStep(step - 1)}><ArrowLeft size={16} /> Back</button> : <span />}
           {step < 3
             ? <button className="btn primary" disabled={!stepOk[step]} onClick={() => { if (step === 1 && sos && bestBank && !bankId) setBankId(bestBank.id); setStep(step + 1); }}>Continue <ArrowRight size={16} /></button>
-            : <button className="btn primary" disabled={!stepOk[3] || !bank} onClick={submit}>{sos ? <><AlertOctagon size={16} /> Send emergency request</> : 'Place request'}</button>}
+            : <button className="btn primary" disabled={!stepOk[3] || !bank || busy} onClick={submit}>{busy ? 'Sending…' : sos ? <><AlertOctagon size={16} /> Send emergency request</> : 'Place request'}</button>}
         </div>
       </div>
 

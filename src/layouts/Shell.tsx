@@ -1,12 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, AlertOctagon, Banknote, Bell, BarChart3, Building2, CalendarHeart, ChevronsUpDown, ClipboardCheck, ClipboardList, Droplets,
+  Activity, AlertOctagon, Banknote, Bell, BarChart3, Building2, CalendarHeart, ChevronsUpDown, ClipboardCheck, ClipboardList, Droplets, LogOut, X,
   FileBarChart2, HandHeart, HeartPulse, Home, Landmark, LifeBuoy, Menu, MessagesSquare, Moon, Network, Package, ReceiptIndianRupee, Repeat, Scale, Search, ShieldCheck, Sun, Syringe, Target, UserCircle2, Users, Wallet, History, Stethoscope, Store, type LucideIcon,
 } from 'lucide-react';
 import type { Role } from '../data/types';
 import { ago } from '../data/rules';
 import { ME, PERSONA } from '../data/seed';
+import { apiMode, hasSession } from '../api/client';
 import { useStore } from '../store/store';
 import { Logo, Notice, useToast } from '../ui/kit';
 
@@ -16,12 +17,23 @@ interface NavGroup { label?: string; items: NavItem[] }
 const ROLE_LABEL: Record<Role, string> = { user: 'Patient & donor', bank: 'Blood centre', referral: 'Hospital / doctor', franchise: 'Franchise', admin: 'Raktkoshika admin' };
 const ROLE_ICON: Record<Role, LucideIcon> = { user: UserCircle2, bank: Droplets, referral: Stethoscope, franchise: Store, admin: ShieldCheck };
 
-const RoleCtx = createContext<{ role: Role; me: string; base: string; persona: (typeof PERSONA)[Role] }>({ role: 'user', me: 'u1', base: '/app/user', persona: PERSONA.user });
+interface Persona { name: string; org: string; initials: string }
+const RoleCtx = createContext<{ role: Role; me: string; base: string; persona: Persona }>({ role: 'user', me: 'u1', base: '/app/user', persona: PERSONA.user });
 export const useRole = () => useContext(RoleCtx);
+
+/** The signed-in account's id: from the server in API mode, the sample account otherwise. */
+const useMeId = (role: Role) => {
+  const { db } = useStore();
+  return db.me?.role === role ? db.me.id : ME[role];
+};
+/** Centres a blood-centre account runs: its own plus its branches. */
+export const myCentres = (banks: { id: string; parentId?: string }[], me: string) => banks.filter((b) => b.id === me || b.parentId === me).map((b) => b.id);
 
 function useNav(role: Role): NavGroup[] {
   const { db } = useStore();
-  const queue = db.orders.filter((o) => o.bankId === ME.bank && !['completed', 'rejected', 'cancelled'].includes(o.stage)).length;
+  const meId = useMeId(role);
+  const centres = myCentres(db.banks, meId);
+  const queue = db.orders.filter((o) => centres.includes(o.bankId) && !['completed', 'rejected', 'cancelled'].includes(o.stage)).length;
   const pendingApps = db.applications.filter((a) => a.status === 'pending').length;
   const openTickets = db.tickets.filter((t) => t.status === 'open').length;
   switch (role) {
@@ -65,17 +77,19 @@ function useTheme() {
 
 function Palette({ role, base, nav, onClose }: { role: Role; base: string; nav: NavGroup[]; onClose: () => void }) {
   const { db } = useStore();
+  const meId = useMeId(role);
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const results = useMemo(() => {
     const s = q.toLowerCase().trim();
     const pages = nav.flatMap((g) => g.items).map((i) => ({ key: `p${i.to}`, title: i.label, sub: 'Page', to: i.to ? `${base}/${i.to}` : base }));
     const canSeeOrders = role === 'admin' || role === 'bank' || role === 'user' || role === 'referral';
+    const centres = myCentres(db.banks, meId);
     const orders = canSeeOrders ? db.orders
-      .filter((o) => role === 'admin' || (role === 'bank' ? o.bankId === ME.bank : o.ownerId === ME[role]))
+      .filter((o) => role === 'admin' || (role === 'bank' ? centres.includes(o.bankId) : o.ownerId === meId))
       .map((o) => ({ key: o.id, title: `${o.id} · ${o.patient.name}`, sub: `Order · ${o.units} × ${o.group}`, to: role === 'bank' ? `${base}/requests` : role === 'admin' ? `${base}/compliance` : `${base}/orders/${o.id}` })) : [];
     return [...pages, ...orders].filter((r) => !s || `${r.title} ${r.sub}`.toLowerCase().includes(s)).slice(0, 8);
-  }, [q, db.orders, nav, base, role]);
+  }, [q, db.orders, db.banks, nav, base, role, meId]);
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
       <div className="modal palette" role="dialog" aria-label="Search">
@@ -94,11 +108,11 @@ function Palette({ role, base, nav, onClose }: { role: Role; base: string; nav: 
 }
 
 export function Shell({ role }: { role: Role }) {
-  const { db, act, sync, connect } = useStore();
+  const { db, act, sync, connect, signOut, writeError, clearWriteError } = useStore();
   const nav = useNav(role);
   const base = `/app/${role}`;
-  const me = db.me?.role === role ? db.me.id : ME[role];
-  const persona = PERSONA[role];
+  const me = useMeId(role);
+  const persona: Persona = db.me?.role === role ? db.me : PERSONA[role];
   const [theme, setTheme] = useTheme();
   const [open, setOpen] = useState(false);
   const [bell, setBell] = useState(false);
@@ -123,6 +137,15 @@ export function Shell({ role }: { role: Role }) {
   const canOrder = role === 'user' || role === 'referral';
   const ctx = useMemo(() => ({ role, me, base, persona }), [role, me, base, persona]);
   const toneColor = { info: 'var(--info)', good: 'var(--good)', warn: 'var(--warn)', crit: 'var(--crit)' };
+  const live = sync.mode === 'local' ? { tone: 'info', text: 'Demo mode' }
+    : sync.status === 'ready' ? { tone: 'good', text: 'Live' }
+      : sync.status === 'offline' ? { tone: 'crit', text: 'Offline' } : { tone: '', text: 'Connecting' };
+
+  // In API mode every portal needs its own sign-in. A sign-out or expired session removes the saved token
+  // and changes `sync`, which re-renders this check.
+  if (apiMode && !hasSession(role)) {
+    return <Navigate to={`/login?role=${role}`} replace />;
+  }
 
   return (
     <RoleCtx.Provider value={ctx}>
@@ -155,9 +178,10 @@ export function Shell({ role }: { role: Role }) {
                   const I = ROLE_ICON[r];
                   return <button key={r} className="list-row" style={{ padding: '10px 16px' }} onClick={() => { setRoles(false); navigate(`/app/${r}`); }}><I size={18} /><span className={r === role ? 'strong' : ''}>{ROLE_LABEL[r]}</span></button>;
                 })}
+                <button className="list-row" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)', color: 'var(--crit)' }} onClick={() => { setRoles(false); signOut(role); navigate('/login'); toast('Signed out'); }}><LogOut size={18} /><span className="strong">Sign out</span></button>
               </div>
             )}
-            <button className="persona" onClick={() => setRoles(!roles)} aria-expanded={roles} aria-label="Switch portal">
+            <button className="persona" onClick={() => setRoles(!roles)} aria-expanded={roles} aria-label="Account: switch portal or sign out">
               <span className="avatar">{persona.initials}</span>
               <span className="grow"><span className="strong truncate" style={{ display: 'block', fontSize: 13.5 }}>{persona.name}</span><span className="truncate" style={{ display: 'block', fontSize: 12, color: 'var(--on-navy-2)' }}>{persona.org}</span></span>
               <ChevronsUpDown size={16} color="var(--on-navy-2)" />
@@ -167,15 +191,15 @@ export function Shell({ role }: { role: Role }) {
 
         <div className="main">
       <div className="demo-bar">
-        <span>Demo with sample data. Nothing here is a real patient, payment or stock record.</span>
-        <button onClick={() => { act.reset(); toast('Demo data restored'); }}>Reset demo</button>
+        <span>{apiMode ? 'Test system with sample data. Payments are test payments: no real money moves.' : 'Demo with sample data. Nothing here is a real patient, payment or stock record.'}</span>
+        {(!apiMode || role === 'admin') && <button onClick={() => { act.reset(); toast('Sample data restored'); }}>{apiMode ? 'Restore sample data' : 'Reset demo'}</button>}
       </div>
           <div className="topbar">
             <button className="btn icon quiet show-m" onClick={() => setOpen(true)} aria-label="Open menu"><Menu size={21} /></button>
             <span className="show-m"><Logo size={26} word={false} /></span>
             <button className="searchbtn" onClick={() => setPalette(true)}><Search size={16} /> <span className="truncate">Search</span> <kbd>Ctrl K</kbd></button>
             <div className="row" style={{ marginLeft: 'auto', gap: 4 }}>
-              <span className="hide-m" style={{ marginRight: 8 }}><span className="badge good"><i className="dot live" />Network live</span></span>
+              <span className="hide-m" style={{ marginRight: 8 }}><span className={`badge ${live.tone}`} role="status"><i className={`dot ${live.tone === 'good' ? 'live' : ''}`} />{live.text}</span></span>
               <button className="btn icon quiet" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>
               <div style={{ position: 'relative' }}>
                 <button className="btn icon quiet" style={{ position: 'relative' }} aria-label={`${unread} unread notifications`} aria-expanded={bell} onClick={() => { setBell(!bell); }}>
@@ -202,9 +226,15 @@ export function Shell({ role }: { role: Role }) {
             </div>
           </div>
           <main className="page" key={loc.pathname}>
-            {sync.mode === 'api' && sync.status === 'connecting' && <Notice tone="info">Connecting to the server…</Notice>}
-            {sync.mode === 'api' && sync.status === 'error' && <Notice tone="crit">Server: {sync.error}. The screen shows the server's latest data.</Notice>}
-            <Outlet />
+            {sync.mode === 'api' && sync.status === 'connecting' && <Notice tone="info">Loading your account…</Notice>}
+            {sync.mode === 'api' && sync.status === 'offline' && <Notice tone="crit"><b>Cannot reach the server.</b> What you see may be out of date, and changes will not be saved. Check your connection, then reload the page.</Notice>}
+            {writeError && (
+              <div style={{ marginBottom: 14 }} role="alert">
+                <Notice tone="warn"><div className="row between top"><span><b>That did not go through.</b> {writeError}</span><button className="btn icon sm quiet" aria-label="Dismiss" onClick={clearWriteError}><X size={15} /></button></div></Notice>
+              </div>
+            )}
+            {/* After switching portals, db still holds the previous account's data until the new one loads. */}
+            {!db.me || db.me.role === role ? <Outlet /> : null}
           </main>
         </div>
 

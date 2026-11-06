@@ -1,9 +1,13 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useStore } from '../../store/store';
 import { ArrowLeft } from 'lucide-react';
 import { FindResults } from '../shared/FindBlood';
 import { Logo, Notice } from '../../ui/kit';
 
 export default function PublicFind() {
+  const { loadPublic } = useStore();
+  useEffect(() => { loadPublic(); }, [loadPublic]);
   return (
     <>
       <div style={{ background: '#16202E', color: '#F3F0EA', padding: '14px clamp(16px, 4vw, 56px)' }} className="row between">
