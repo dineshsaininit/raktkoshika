@@ -11,7 +11,7 @@ export default function Centres() {
       <div style={{ background: '#16202E', color: '#F3F0EA', padding: '14px clamp(16px, 4vw, 56px)' }} className="row between">
         <Link to="/" style={{ color: 'inherit', textDecoration: 'none' }}><Logo size={30} /></Link>
         <div className="row">
-          <Link to="/find" className="btn sm" style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.25)' }}>Find blood</Link>
+          <Link to="/find?near=1" className="btn sm" style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.25)' }}>Find blood</Link>
           <Link to="/login" className="btn sm" style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.25)' }}>Sign in</Link>
         </div>
       </div>

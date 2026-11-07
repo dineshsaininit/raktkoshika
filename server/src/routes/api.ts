@@ -38,7 +38,7 @@ api.get('/public/directory/districts', async (req, res) => {
   res.json(await D.directoryDistricts(parse(z.object({ state: text(80) }), req.query).state));
 });
 api.get('/public/directory/nearby', async (req, res) => {
-  const f = parse(z.object({ lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180), limit: z.coerce.number().int().min(1).max(30).default(8) }), req.query);
+  const f = parse(z.object({ lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180), limit: z.coerce.number().int().min(1).max(100).default(8) }), req.query);
   res.json(await D.nearbyDirectory(f.lat, f.lng, f.limit));
 });
 api.get('/public/directory', async (req, res) => {
