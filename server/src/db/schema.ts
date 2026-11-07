@@ -35,6 +35,8 @@ create table if not exists banks (
   created_at timestamptz not null default now()
 );
 create index if not exists banks_parent on banks(parent_id);
+alter table banks add column if not exists lat double precision;
+alter table banks add column if not exists lng double precision;
 
 create table if not exists files (
   id         text primary key,

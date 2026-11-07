@@ -135,6 +135,8 @@ export const directory = {
   meta: () => raw<DirectoryMeta>('GET', '/public/directory/meta', undefined, false),
   states: () => raw<{ state: string; count: number }[]>('GET', '/public/directory/states', undefined, false),
   districts: (state: string) => raw<{ district: string; count: number }[]>('GET', `/public/directory/districts?${qs({ state })}`, undefined, false),
+  nearby: (lat: number, lng: number, limit = 8) =>
+    raw<(DirectoryCentre & { km: number })[]>('GET', `/public/directory/nearby?${qs({ lat, lng, limit })}`, undefined, false),
   search: (f: { state?: string; district?: string; q?: string; category?: string; components?: boolean; page?: number; size?: number }) =>
     raw<{ total: number; page: number; size: number; rows: DirectoryCentre[] }>('GET', `/public/directory?${qs(f)}`, undefined, false),
   /** HQ only. Checks (dryRun) or saves a government CSV / data.gov.in JSON file. */

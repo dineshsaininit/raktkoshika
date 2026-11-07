@@ -191,3 +191,13 @@ export async function findLicence(license: string) {
   const r = await one(`select * from directory_centres where replace(lower(license), ' ', '') = $1 limit 1`, [norm]);
   return r ? out(r) : null;
 }
+
+/** Directory centres nearest a point, by straight-line distance (km). Only rows that have coordinates. */
+export async function nearbyDirectory(lat: number, lng: number, limit: number) {
+  const rows = await q(`select * from (
+      select d.*, 6371 * 2 * asin(sqrt(power(sin(radians(d.lat - $1) / 2), 2) + cos(radians($1)) * cos(radians(d.lat)) * power(sin(radians(d.lng - $2) / 2), 2))) as km,
+        (select b.id from banks b where b.verified and d.license <> '' and lower(b.license) = lower(d.license) limit 1) as network_bank_id
+      from directory_centres d where d.lat is not null and d.lng is not null
+    ) x order by km limit $3`, [lat, lng, limit]);
+  return rows.map((r) => ({ ...out(r), km: Math.round(Number(r.km) * 10) / 10 }));
+}
