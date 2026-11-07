@@ -4,6 +4,7 @@ import { BadgeCheck, Clock, MapPin, Phone, Star } from 'lucide-react';
 import { compatibleDonors, COMPONENTS, COMPONENT_KEYS, GROUPS, inr, processingFee } from '../../data/rules';
 import type { BloodGroup, Component } from '../../data/types';
 import { useStore } from '../../store/store';
+import { ERAKTKOSH_URL } from '../../api/client';
 import { useRole } from '../../layouts/Shell';
 import { Badge, Empty, gl, Notice, PageHead } from '../../ui/kit';
 
@@ -87,6 +88,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
         ))}
         {!rows.length && <Empty title="No verified centres yet" />}
       </div>
+      <Notice tone="info">These are centres on the Raktkoshika network. For every other licensed centre, see the <Link to={orderBase.startsWith('/app') ? orderBase.replace(/\/order$/, '/centres') : '/centres'} style={{ fontWeight: 600 }}>government directory</Link> or check stock on <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { me, requireAuth, requireRole } from '../lib/auth.ts';
 import { bus, emitChange } from '../lib/events.ts';
 import { forbidden, parse } from '../lib/http.ts';
 import * as C from '../services/community.ts';
+import * as D from '../services/directory.ts';
 import * as O from '../services/orders.ts';
 import * as P from '../services/people.ts';
 import { seedDatabase } from '../services/seed.ts';
@@ -29,6 +30,21 @@ api.get('/health', (_req, res) => { res.json({ ok: true, time: new Date().toISOS
 
 /** Stock for the public "find blood" page and landing board: verified centres and in-date available units. */
 api.get('/public/snapshot', async (_req, res) => { res.json(await publicSnapshot()); });
+
+/* Government directory of licensed blood centres (no stock), searchable like e-RaktKosh's blood bank directory. */
+api.get('/public/directory/meta', async (_req, res) => { res.json(await D.directoryMeta()); });
+api.get('/public/directory/states', async (_req, res) => { res.json(await D.directoryStates()); });
+api.get('/public/directory/districts', async (req, res) => {
+  res.json(await D.directoryDistricts(parse(z.object({ state: text(80) }), req.query).state));
+});
+api.get('/public/directory', async (req, res) => {
+  const f = parse(z.object({
+    state: z.string().trim().max(80).optional(), district: z.string().trim().max(80).optional(), q: z.string().trim().max(80).optional(),
+    category: z.string().trim().max(40).optional(), components: z.enum(['true', 'false']).optional(),
+    page: z.coerce.number().int().min(1).max(1000).default(1), size: z.coerce.number().int().min(1).max(100).default(20),
+  }), req.query);
+  res.json(await D.searchDirectory({ ...f, components: f.components === 'true' }));
+});
 
 /* ---------- everything below needs a session ---------- */
 
@@ -203,6 +219,19 @@ api.post('/tickets', async (req, res) => {
   res.status(201).json((await C.addTicket(me(req), parse(z.object({ subject: text(200) }), req.body).subject) as Record<string, unknown>));
 });
 api.post('/tickets/:id/resolve', requireRole('franchise', 'admin'), async (req, res) => { await C.resolveTicket(me(req), param(req)); res.json(ok); });
+
+/* ---------- government directory (HQ) ---------- */
+
+api.post('/admin/directory/import', requireRole('admin'), async (req, res) => {
+  const b = parse(z.object({
+    text: z.string().min(10).max(12_000_000), source: text(120), defaultState: z.string().trim().max(80).optional(),
+    replace: z.enum(['source', 'state']).default('source'), dryRun: z.boolean().default(false),
+  }), req.body);
+  res.json(await D.importDirectory(b.text, b));
+});
+api.get('/admin/directory/licence', requireRole('admin', 'franchise'), async (req, res) => {
+  res.json({ match: await D.findLicence(parse(z.object({ license: text(60) }), req.query).license) });
+});
 
 /* ---------- prescription files ---------- */
 

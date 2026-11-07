@@ -70,7 +70,7 @@ export default function Landing() {
     <div className="landing">
       <header className="nav-pub">
         <Logo size={32} sub />
-        <ul><li><a href="#how">How it works</a></li><li><a href="#wallet">Wallet</a></li><li><a href="#who">Who it serves</a></li><li><a href="#trust">Trust</a></li></ul>
+        <ul><li><Link to="/centres">Blood centres</Link></li><li><a href="#how">How it works</a></li><li><a href="#wallet">Wallet</a></li><li><a href="#who">Who it serves</a></li><li><a href="#trust">Trust</a></li></ul>
         <Link to="/login" className="btn sm" style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.25)' }}>Sign in</Link>
       </header>
 

@@ -6,6 +6,7 @@ import type { LeadStage } from '../../data/types';
 import { useStore } from '../../store/store';
 import { useRole } from '../../layouts/Shell';
 import { Badge, BarChart, Empty, Field, Modal, Notice, PageHead, Stat, useToast } from '../../ui/kit';
+import { DirectoryPicker } from '../../ui/GovLookup';
 
 const STAGES: LeadStage[] = ['Lead', 'Demo done', 'Documents', 'Live'];
 const EARN = [{ k: 'Jun', v: 11200 }, { k: 'Jul', v: 14400 }, { k: 'Aug', v: 17250 }, { k: 'Sep', v: 21500 }, { k: 'Oct', v: 28750 }];
@@ -137,6 +138,7 @@ export function FranchiseCentres() {
       {open && (
         <Modal title="New centre application" sub="Goes to Raktkoshika HQ for licence verification." onClose={() => setOpen(false)}>
           <div className="stack">
+            <DirectoryPicker onPick={(c) => setF({ name: c.name, city: c.city || c.district, license: c.license })} />
             <Field label="Centre name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <div className="grid g2">
               <Field label="City"><input className="input" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} /></Field>
