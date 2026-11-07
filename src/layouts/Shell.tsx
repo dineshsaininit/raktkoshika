@@ -38,12 +38,12 @@ function useNav(role: Role): NavGroup[] {
   const openTickets = db.tickets.filter((t) => t.status === 'open').length;
   switch (role) {
     case 'user': return [
-      { items: [{ to: '', label: 'Home', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'My orders', icon: ClipboardList, tab: true }] },
+      { items: [{ to: '', label: 'Home', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'My orders', icon: ClipboardList, tab: true }, { to: 'centres', label: 'Blood centres', icon: Building2 }] },
       { label: 'Give', items: [{ to: 'donate', label: 'Donate blood', icon: HandHeart }, { to: 'donor-requests', label: 'Donor requests', icon: Users }, { to: 'camps', label: 'Blood camps', icon: CalendarHeart }] },
       { label: 'Account', items: [{ to: 'plans', label: 'Regular transfusions', icon: Repeat }, { to: 'wallet', label: 'Wallet', icon: Wallet, tab: true }, { to: 'chat', label: 'Chat', icon: MessagesSquare }, { to: 'history', label: 'History', icon: History }, { to: 'profile', label: 'Profile', icon: UserCircle2 }] },
     ];
     case 'referral': return [
-      { items: [{ to: '', label: 'Overview', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'Patient orders', icon: ClipboardList, tab: true }, { to: 'plans', label: 'Regular transfusions', icon: Repeat }] },
+      { items: [{ to: '', label: 'Overview', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'Patient orders', icon: ClipboardList, tab: true }, { to: 'plans', label: 'Regular transfusions', icon: Repeat }, { to: 'centres', label: 'Blood centres', icon: Building2 }] },
       { label: 'Donors', items: [{ to: 'donor-requests', label: 'Donor requests', icon: Users }, { to: 'camps', label: 'Hospital camps', icon: CalendarHeart }] },
       { label: 'Account', items: [{ to: 'wallet', label: 'Hospital wallet', icon: Wallet, tab: true }, { to: 'chat', label: 'Chat', icon: MessagesSquare }, { to: 'history', label: 'History', icon: History }] },
     ];
@@ -56,7 +56,7 @@ function useNav(role: Role): NavGroup[] {
       { items: [{ to: '', label: 'Overview', icon: Home, end: true, tab: true }, { to: 'pipeline', label: 'Sales pipeline', icon: Target, tab: true }, { to: 'centres', label: 'Centres & onboarding', icon: Building2, tab: true }, { to: 'earnings', label: 'Earnings', icon: Banknote, tab: true }, { to: 'support', label: 'Support', icon: LifeBuoy, count: openTickets }, { to: 'chat', label: 'Chat', icon: MessagesSquare }] },
     ];
     case 'admin': return [
-      { items: [{ to: '', label: 'Command centre', icon: Activity, end: true, tab: true }, { to: 'network', label: 'Network stock', icon: Network, tab: true }, { to: 'verification', label: 'Verification', icon: ShieldCheck, count: pendingApps, tab: true }] },
+      { items: [{ to: '', label: 'Command centre', icon: Activity, end: true, tab: true }, { to: 'network', label: 'Network stock', icon: Network, tab: true }, { to: 'directory', label: 'Govt directory', icon: Building2 }, { to: 'verification', label: 'Verification', icon: ShieldCheck, count: pendingApps, tab: true }] },
       { label: 'Business', items: [{ to: 'transactions', label: 'Wallet ledger', icon: ReceiptIndianRupee }, { to: 'revenue', label: 'Revenue models', icon: BarChart3, tab: true }] },
       { label: 'Governance', items: [{ to: 'compliance', label: 'Compliance & audit', icon: Scale }, { to: 'support', label: 'Support', icon: LifeBuoy, count: openTickets }, { to: 'chat', label: 'Chat', icon: MessagesSquare }] },
     ];

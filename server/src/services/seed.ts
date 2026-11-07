@@ -60,8 +60,8 @@ export async function seedDatabase() {
 
     // Parents first, so branch centres can point at them.
     const banks = [...d.banks].sort((a, b) => Number(!!a.parentId) - Number(!!b.parentId));
-    await insert(c, 'banks', ['id', 'name', 'city', 'district', 'type', 'license', 'km', 'rating', 'open24', 'verified', 'sync_min', 'parent_id', 'phone', 'created_at'],
-      banks.map((b, i) => [b.id, b.name, b.city, b.district, b.type, b.license, b.km, b.rating, b.open24, b.verified, b.syncMin, b.parentId, b.phone, iso(-400 + i)]));
+    await insert(c, 'banks', ['id', 'name', 'city', 'district', 'type', 'license', 'km', 'rating', 'open24', 'verified', 'sync_min', 'parent_id', 'phone', 'lat', 'lng', 'created_at'],
+      banks.map((b, i) => [b.id, b.name, b.city, b.district, b.type, b.license, b.km, b.rating, b.open24, b.verified, b.syncMin, b.parentId, b.phone, b.lat, b.lng, iso(-400 + i)]));
 
     await insert(c, 'orders', ['id', 'owner_id', 'kind', 'urgency', 'patient_name', 'patient_age', 'hospital', 'ward', 'doctor', 'grp', 'component', 'units', 'bank_id',
       'scheduled_for', 'series_id', 'fulfilment', 'rx', 'stage', 'pay_method', 'fee', 'total', 'credits_used', 'cash', 'settled', 'reaction', 'created_at'],

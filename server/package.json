@@ -8,7 +8,8 @@
     "start": "tsx src/index.ts",
     "seed": "tsx src/scripts/seed.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --test-concurrency=1 test/*.test.ts"
+    "test": "tsx --test --test-concurrency=1 test/*.test.ts",
+    "import:directory": "tsx src/scripts/import-directory.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

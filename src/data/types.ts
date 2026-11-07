@@ -5,7 +5,7 @@ export type BankType = 'Government' | 'Charitable' | 'Private';
 
 export interface Bank {
   id: string; name: string; city: string; district: string; type: BankType; license: string;
-  km: number; rating: number; open24: boolean; verified: boolean; syncMin: number; parentId?: string; phone: string;
+  km: number; rating: number; open24: boolean; verified: boolean; syncMin: number; parentId?: string; phone: string; lat?: number; lng?: number;
 }
 export type BatchStatus = 'quarantine' | 'available' | 'reserved' | 'issued' | 'discarded';
 export interface Batch {

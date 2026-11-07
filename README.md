@@ -28,7 +28,7 @@ Useful commands in `server/`:
 | Command | What it does |
 |---|---|
 | `npm run seed` | Wipes the database and reloads the sample data |
-| `npm test` | 31 end-to-end API tests. They use a separate database (`<name>_test`) because they wipe it |
+| `npm test` | 37 end-to-end API tests. They use a separate database (`<name>_test`) because they wipe it |
 | `npm run typecheck` | Type-checks the server |
 
 ## Sign-ins (sample data)
@@ -46,6 +46,30 @@ Useful commands in `server/`:
 
 The same list lives in `src/data/demoAccounts.ts`, and the sign-in page shows it. Anyone can also create a
 patient/donor account from the sign-in page.
+
+## Government directory of licensed blood centres
+
+The site has a public directory of licensed blood centres (`/#/centres`), searchable by state, district, name
+and PIN code, laid out like the blood bank directory on [e-RaktKosh](https://eraktkosh.mohfw.gov.in/eraktkoshPortal/#/).
+It starts empty. Load the official list from either source:
+
+- **National Health Portal "Blood Bank Directory"** on [data.gov.in](https://www.data.gov.in): download the CSV,
+  or call the API with your own free key and save the JSON.
+- **State Blood Transfusion Council list** (for example Maharashtra SBTC): open it in Excel, keep one header
+  row, save as CSV.
+
+Then either sign in as HQ admin and use **Govt directory → Import a file** (check first, then import), or run:
+
+```
+cd server
+npm run import:directory -- path\to\file.csv --source "National Health Portal, Nov 2026"
+npm run import:directory -- path\to\sbtc.csv --state Maharashtra --replace state --source "Maharashtra SBTC, Nov 2026"
+```
+
+Columns are matched by name, so both formats work. The directory has no stock: centres on Raktkoshika show live
+stock, and the rest link to e-RaktKosh. HQ's verification screen checks each application's licence number against
+the directory, and franchises can fill an application by picking a centre from it. Restoring the sample data
+never touches the directory.
 
 ## Host it on Render
 

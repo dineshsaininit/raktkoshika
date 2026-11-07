@@ -5,6 +5,9 @@ import { Shell } from './layouts/Shell';
 import Landing from './pages/public/Landing';
 import Login from './pages/public/Login';
 import PublicFind from './pages/public/PublicFind';
+import Centres from './pages/public/Centres';
+import { DirectoryPage } from './pages/shared/Directory';
+import { GovDirectory } from './pages/admin/GovDirectory';
 import { FindBlood } from './pages/shared/FindBlood';
 import { NewOrder } from './pages/shared/NewOrder';
 import { OrderDetail, OrdersPage } from './pages/shared/Orders';
@@ -24,6 +27,7 @@ import { RevenueModels } from './pages/admin/Revenue';
 const shared = (
   <>
     <Route path="find" element={<FindBlood />} />
+    <Route path="centres" element={<DirectoryPage />} />
     <Route path="order" element={<NewOrder />} />
     <Route path="orders" element={<OrdersPage />} />
     <Route path="orders/:id" element={<OrderDetail />} />
@@ -45,6 +49,7 @@ export default function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/find" element={<PublicFind />} />
+            <Route path="/centres" element={<Centres />} />
             <Route path="/app/user" element={<Shell role="user" />}>
               <Route index element={<UserHome />} />
               {shared}
@@ -80,6 +85,7 @@ export default function App() {
             <Route path="/app/admin" element={<Shell role="admin" />}>
               <Route index element={<AdminHome />} />
               <Route path="network" element={<AdminNetwork />} />
+              <Route path="directory" element={<GovDirectory />} />
               <Route path="verification" element={<AdminVerification />} />
               <Route path="transactions" element={<AdminLedger />} />
               <Route path="revenue" element={<RevenueModels />} />

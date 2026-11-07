@@ -35,6 +35,8 @@ create table if not exists banks (
   created_at timestamptz not null default now()
 );
 create index if not exists banks_parent on banks(parent_id);
+alter table banks add column if not exists lat double precision;
+alter table banks add column if not exists lng double precision;
 
 create table if not exists files (
   id         text primary key,
@@ -318,6 +320,35 @@ create table if not exists sensors (
   min     numeric not null,
   max     numeric not null
 );
+
+-- Licensed blood centres from government data (National Health Portal / data.gov.in, State Blood
+-- Transfusion Councils). A directory only: it has no stock. Restoring the sample data never touches it.
+create table if not exists directory_centres (
+  id            serial primary key,
+  name          text not null,
+  state         text not null,
+  district      text not null default '',
+  city          text not null default '',
+  address       text not null default '',
+  pincode       text not null default '',
+  phone         text not null default '',
+  mobile        text not null default '',
+  email         text not null default '',
+  website       text not null default '',
+  category      text not null default '',
+  components    boolean,
+  apheresis     boolean,
+  service_time  text not null default '',
+  license       text not null default '',
+  license_date  text not null default '',
+  renewal_date  text not null default '',
+  lat           double precision,
+  lng           double precision,
+  source        text not null,
+  imported_at   timestamptz not null default now()
+);
+create index if not exists directory_place on directory_centres(lower(state), lower(district));
+create index if not exists directory_license on directory_centres(lower(license));
 `;
 
 /** Every table, children before parents, for wiping during a reset. */

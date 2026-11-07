@@ -70,7 +70,7 @@ export default function Landing() {
     <div className="landing">
       <header className="nav-pub">
         <Logo size={32} sub />
-        <ul><li><a href="#how">How it works</a></li><li><a href="#wallet">Wallet</a></li><li><a href="#who">Who it serves</a></li><li><a href="#trust">Trust</a></li></ul>
+        <ul><li><Link to="/centres">Blood centres</Link></li><li><a href="#how">How it works</a></li><li><a href="#wallet">Wallet</a></li><li><a href="#who">Who it serves</a></li><li><a href="#trust">Trust</a></li></ul>
         <Link to="/login" className="btn sm" style={{ background: 'rgba(255,255,255,.1)', color: '#fff', borderColor: 'rgba(255,255,255,.25)' }}>Sign in</Link>
       </header>
 
@@ -80,7 +80,7 @@ export default function Landing() {
             <h1>One network.<br />One wallet.<br /><em>Every drop found.</em></h1>
             <p className="lede">Raktkoshika connects blood centres, hospitals and donors across India. See what is available right now, request it in minutes, and let every donation count at any centre in the network.</p>
             <div className="row wrap" style={{ gap: 12 }}>
-              <Link to="/find" className="btn primary lg"><Search size={19} /> Find blood now</Link>
+              <Link to="/find?near=1" className="btn primary lg"><Search size={19} /> Find blood near me</Link>
               <Link to="/login" className="btn lg">Explore the portals <ArrowRight size={18} /></Link>
             </div>
             <div className="row wrap" style={{ marginTop: 22, gap: 18, fontSize: 13.5, color: '#BEC7D2' }}>

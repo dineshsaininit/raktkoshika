@@ -16,13 +16,13 @@ const ri = (a: number, b: number) => a + Math.floor(rand() * (b - a + 1));
 const iso = (days: number, hours = 0) => new Date(Date.now() + days * 864e5 + hours * 36e5).toISOString();
 
 const banks: Bank[] = [
-  { id: 'b1', name: 'Krishna Valley Blood Centre', city: 'Sangli', district: 'Sangli', type: 'Charitable', license: 'MH/BB/SGL/0142', km: 2.1, rating: 4.8, open24: true, verified: true, syncMin: 2, phone: '+91 90000 10001' },
-  { id: 'b2', name: 'Miraj Civic Blood Centre', city: 'Miraj', district: 'Sangli', type: 'Government', license: 'MH/BB/SGL/0097', km: 8.4, rating: 4.3, open24: true, verified: true, syncMin: 11, phone: '+91 90000 10002' },
-  { id: 'b7', name: 'Krishna Valley, Islampur Centre', city: 'Islampur', district: 'Sangli', type: 'Charitable', license: 'MH/BB/SGL/0143', km: 32, rating: 4.6, open24: false, verified: true, syncMin: 6, parentId: 'b1', phone: '+91 90000 10007' },
-  { id: 'b3', name: 'Panchganga Blood Centre', city: 'Kolhapur', district: 'Kolhapur', type: 'Charitable', license: 'MH/BB/KOP/0211', km: 48, rating: 4.7, open24: true, verified: true, syncMin: 4, phone: '+91 90000 10003' },
-  { id: 'b4', name: 'Satara Seva Blood Centre', city: 'Satara', district: 'Satara', type: 'Charitable', license: 'MH/BB/STR/0076', km: 118, rating: 4.5, open24: false, verified: true, syncMin: 23, phone: '+91 90000 10004' },
-  { id: 'b5', name: 'Bhima Valley Blood Centre', city: 'Solapur', district: 'Solapur', type: 'Government', license: 'MH/BB/SLP/0163', km: 190, rating: 4.1, open24: true, verified: true, syncMin: 38, phone: '+91 90000 10005' },
-  { id: 'b6', name: 'Deccan Life Blood Centre', city: 'Pune', district: 'Pune', type: 'Private', license: 'MH/BB/PNQ/0388', km: 235, rating: 4.6, open24: true, verified: true, syncMin: 3, phone: '+91 90000 10006' },
+  { id: 'b1', name: 'Krishna Valley Blood Centre', city: 'Sangli', district: 'Sangli', type: 'Charitable', license: 'MH/BB/SGL/0142', km: 2.1, rating: 4.8, open24: true, verified: true, syncMin: 2, phone: '+91 90000 10001', lat: 16.8524, lng: 74.5815 },
+  { id: 'b2', name: 'Miraj Civic Blood Centre', city: 'Miraj', district: 'Sangli', type: 'Government', license: 'MH/BB/SGL/0097', km: 8.4, rating: 4.3, open24: true, verified: true, syncMin: 11, phone: '+91 90000 10002', lat: 16.8222, lng: 74.645 },
+  { id: 'b7', name: 'Krishna Valley, Islampur Centre', city: 'Islampur', district: 'Sangli', type: 'Charitable', license: 'MH/BB/SGL/0143', km: 32, rating: 4.6, open24: false, verified: true, syncMin: 6, parentId: 'b1', phone: '+91 90000 10007', lat: 17.048, lng: 74.264 },
+  { id: 'b3', name: 'Panchganga Blood Centre', city: 'Kolhapur', district: 'Kolhapur', type: 'Charitable', license: 'MH/BB/KOP/0211', km: 48, rating: 4.7, open24: true, verified: true, syncMin: 4, phone: '+91 90000 10003', lat: 16.705, lng: 74.2433 },
+  { id: 'b4', name: 'Satara Seva Blood Centre', city: 'Satara', district: 'Satara', type: 'Charitable', license: 'MH/BB/STR/0076', km: 118, rating: 4.5, open24: false, verified: true, syncMin: 23, phone: '+91 90000 10004', lat: 17.6805, lng: 74.0183 },
+  { id: 'b5', name: 'Bhima Valley Blood Centre', city: 'Solapur', district: 'Solapur', type: 'Government', license: 'MH/BB/SLP/0163', km: 190, rating: 4.1, open24: true, verified: true, syncMin: 38, phone: '+91 90000 10005', lat: 17.6599, lng: 75.9064 },
+  { id: 'b6', name: 'Deccan Life Blood Centre', city: 'Pune', district: 'Pune', type: 'Private', license: 'MH/BB/PNQ/0388', km: 235, rating: 4.6, open24: true, verified: true, syncMin: 3, phone: '+91 90000 10006', lat: 18.5204, lng: 73.8567 },
 ];
 
 const GROUP_WEIGHT: Record<BloodGroup, number> = { 'O+': 10, 'B+': 10, 'A+': 7, 'AB+': 3, 'O-': 1.2, 'B-': 1.2, 'A-': 1.2, 'AB-': 0.5 };

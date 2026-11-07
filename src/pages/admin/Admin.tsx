@@ -8,6 +8,7 @@ import { useStore } from '../../store/store';
 import { useRole } from '../../layouts/Shell';
 import { Badge, Empty, gl, LineChart, Notice, PageHead, Stat, Tabs, useToast } from '../../ui/kit';
 import { BroadcastModal } from '../bank/Operations';
+import { LicenceCheck } from '../../ui/GovLookup';
 
 export function AdminHome() {
   const { db } = useStore();
@@ -110,6 +111,7 @@ export function AdminVerification() {
             <article className="card pad stack s" key={a.id}>
               <div className="row between top"><div><h3 style={{ fontSize: 17 }}>{a.name}</h3><div className="small muted">{a.city} · {a.type} · {a.license}</div></div><Badge tone={a.status === 'approved' ? 'good' : a.status === 'rejected' ? 'crit' : complete ? 'info' : 'warn'}>{a.status === 'pending' ? (complete ? 'Ready' : 'Incomplete') : a.status === 'approved' ? 'Approved' : 'Sent back'}</Badge></div>
               <div className="stack s small" style={{ margin: '6px 0' }}>{a.docs.map((d) => <div className="row" key={d.name}>{d.ok ? <CircleCheck size={16} color="var(--good)" /> : <CircleDashed size={16} color="var(--warn)" />}<span className={d.ok ? '' : 'strong'}>{d.name}{d.ok ? '' : ' is missing'}</span></div>)}</div>
+              {a.status === 'pending' && <LicenceCheck license={a.license} name={a.name} />}
               {a.status === 'pending' && (
                 <div className="row">
                   <button className="btn sm" onClick={() => { act.decideApplication(a.id, 'rejected'); toast('Sent back to the franchise'); }}><X size={14} /> Send back</button>

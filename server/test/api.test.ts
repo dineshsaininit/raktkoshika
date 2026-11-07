@@ -9,7 +9,7 @@ import { after, before, describe, it } from 'node:test';
 import request from 'supertest';
 import { DEMO_ACCOUNTS } from '../../src/data/demoAccounts.ts';
 import { createApp } from '../src/app.ts';
-import { connectDb, disconnectDb, one } from '../src/db.ts';
+import { connectDb, disconnectDb, one, q } from '../src/db.ts';
 import { seedDatabase } from '../src/services/seed.ts';
 
 const main = process.env.DATABASE_URL ?? '';
@@ -236,5 +236,67 @@ describe('community and ops', () => {
   it('admin can restore the sample data', async () => {
     const r = await request(app).post('/api/admin/reset').set(as('a1'));
     assert.equal(r.status, 200, r.text);
+  });
+});
+
+describe('government directory', () => {
+  // The directory survives sample-data resets, so clear rows left by earlier test runs.
+  before(async () => { await q("delete from directory_centres where source like 'test%'"); });
+  // Fictional rows in the National Health Portal's column format, including a quoted comma.
+  const nhp = [
+    'Sr No,Blood Bank Name,State,District,City,Address,Pincode,Contact No,Mobile,Email,Category,Blood Component Available,Apheresis,Service Time,License #,Latitude,Longitude',
+    '1,TEST CITY BLOOD CENTRE,MAHARASHTRA,SANGLI,Sangli,"Station Road, Sangli",416416,0233-000000,9000011111,test@example.org,Govt.,YES,NO,24x7,MH/BB/SGL/0142,16.85,74.58',
+    '2,Test Rural Blood Centre,Maharashtra,Satara,Karad,Main Road,415110,,,,Charitable,NO,NO,9 am - 5 pm,TEST-LIC-2,0,0',
+    '3,,Maharashtra,Pune,Pune,Missing name row,411001,,,,Private,YES,YES,24x7,TEST-LIC-3,18.5,73.8',
+  ].join('\r\n');
+  it('only admin can import', async () => {
+    assert.equal((await request(app).post('/api/admin/directory/import').set(as('f1')).send({ text: nhp, source: 'test' })).status, 403);
+  });
+  it('checks a file without saving (dry run), then imports it', async () => {
+    const dry = await request(app).post('/api/admin/directory/import').set(as('a1')).send({ text: nhp, source: 'test', dryRun: true });
+    assert.equal(dry.status, 200, dry.text);
+    assert.equal(dry.body.total, 2);
+    assert.equal(dry.body.skipped, 1);
+    const none = await request(app).get('/api/public/directory?q=Test%20City');
+    assert.equal(none.body.total, 0, none.text);
+    const r = await request(app).post('/api/admin/directory/import').set(as('a1')).send({ text: nhp, source: 'test' });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(r.body.states, ['Maharashtra']);
+  });
+  it('explains a file with the wrong columns', async () => {
+    const r = await request(app).post('/api/admin/directory/import').set(as('a1')).send({ text: 'foo,bar\n1,2', source: 'bad' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /name/);
+  });
+  it('is searchable by anyone, by state, district and name', async () => {
+    const states = (await request(app).get('/api/public/directory/states')).body;
+    assert.ok(states.some((s: { state: string }) => s.state === 'Maharashtra'));
+    const d = (await request(app).get('/api/public/directory/districts?state=maharashtra')).body;
+    assert.deepEqual(d.map((x: { district: string }) => x.district).sort(), ['Sangli', 'Satara']);
+    const s = (await request(app).get('/api/public/directory?state=Maharashtra&district=Sangli')).body;
+    assert.equal(s.total, 1);
+    const c = s.rows[0];
+    assert.equal(c.name, 'Test City Blood Centre');
+    assert.equal(c.address, 'Station Road, Sangli');
+    assert.equal(c.components, true);
+    assert.equal(c.apheresis, false);
+    assert.equal(c.lat, 16.85);
+    assert.equal(c.onNetwork, 'b1', 'matched to the network centre with the same licence');
+    const rural = (await request(app).get('/api/public/directory?q=Rural')).body.rows[0];
+    assert.equal(rural.lat, null, 'zero coordinates are treated as missing');
+  });
+  it('re-importing the same source replaces it, and a sample-data reset keeps it', async () => {
+    await request(app).post('/api/admin/directory/import').set(as('a1')).send({ text: nhp, source: 'test' });
+    assert.equal((await request(app).get('/api/public/directory?q=Test')).body.total, 2);
+    await request(app).post('/api/admin/reset').set(as('a1'));
+    assert.equal((await request(app).get('/api/public/directory?q=Test')).body.total, 2);
+  });
+  it('fills in the state for single-state SBTC files and matches licences for HQ', async () => {
+    const sbtc = 'Name of Blood Centre,District,Licence No,Type\nTest Taluka Blood Centre,Kolhapur,KOP/TEST/9,Charitable';
+    const r = await request(app).post('/api/admin/directory/import').set(as('a1')).send({ text: sbtc, source: 'test-sbtc', defaultState: 'Maharashtra' });
+    assert.equal(r.status, 200, r.text);
+    const m = (await request(app).get('/api/admin/directory/licence?license=kop/test/9').set(as('a1'))).body.match;
+    assert.equal(m.name, 'Test Taluka Blood Centre');
+    assert.equal((await request(app).get('/api/admin/directory/licence?license=NOPE').set(as('a1'))).body.match, null);
   });
 });

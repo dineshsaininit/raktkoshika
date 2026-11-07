@@ -27,6 +27,8 @@ export function createApp() {
   app.use(cors({ origin: config.corsOrigin, credentials: false }));
   // Prescriptions arrive as base64 (up to 3 MB of file), so this one route accepts a larger body.
   app.use('/api/files', express.json({ limit: '5mb' }));
+  // Government directory files can be several MB of CSV.
+  app.use('/api/admin/directory/import', express.json({ limit: '15mb' }));
   app.use(express.json({ limit: '200kb' }));
   if (!config.isProd) app.use((req, _res, next) => { if (req.path.startsWith('/api') && req.path !== '/api/events') console.log(`${req.method} ${req.path}`); next(); });
 

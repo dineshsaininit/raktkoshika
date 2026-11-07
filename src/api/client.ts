@@ -113,3 +113,41 @@ export function subscribe(onChange: () => void) {
   es.addEventListener('change', onChange);
   return () => es.close();
 }
+
+/* ---------- government directory of licensed blood centres ---------- */
+
+export const ERAKTKOSH_URL = 'https://eraktkosh.mohfw.gov.in/eraktkoshPortal/#/';
+
+export interface DirectoryCentre {
+  id: number; name: string; state: string; district: string; city: string; address: string; pincode: string; phone: string; mobile: string;
+  email: string; website: string; category: string; components: boolean | null; apheresis: boolean | null; serviceTime: string;
+  license: string; licenseDate: string; renewalDate: string; lat: number | null; lng: number | null; source: string; importedAt: string;
+  /** Id of the Raktkoshika centre with the same licence, when it has joined the network. */
+  onNetwork: string | null;
+}
+export interface DirectoryMeta { total: number; states: number; importedAt: string | null; sources: { source: string; n: number }[] }
+export interface ImportResult { imported: number; total: number; skipped: number; states: string[]; sample: Partial<DirectoryCentre>[] }
+
+const qs = (o: Record<string, string | number | boolean | undefined>) =>
+  new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== '' && v !== false).map(([k, v]) => [k, String(v)])).toString();
+
+export const directory = {
+  meta: () => raw<DirectoryMeta>('GET', '/public/directory/meta', undefined, false),
+  states: () => raw<{ state: string; count: number }[]>('GET', '/public/directory/states', undefined, false),
+  districts: (state: string) => raw<{ district: string; count: number }[]>('GET', `/public/directory/districts?${qs({ state })}`, undefined, false),
+  nearby: (lat: number, lng: number, limit = 8) =>
+    raw<(DirectoryCentre & { km: number })[]>('GET', `/public/directory/nearby?${qs({ lat, lng, limit })}`, undefined, false),
+  search: (f: { state?: string; district?: string; q?: string; category?: string; components?: boolean; page?: number; size?: number }) =>
+    raw<{ total: number; page: number; size: number; rows: DirectoryCentre[] }>('GET', `/public/directory?${qs(f)}`, undefined, false),
+  /** HQ only. Checks (dryRun) or saves a government CSV / data.gov.in JSON file. */
+  import: (body: { text: string; source: string; defaultState?: string; replace: 'source' | 'state'; dryRun: boolean }) =>
+    call<ImportResult>('POST', '/admin/directory/import', body),
+  /** HQ and franchise: finds a licence number in the directory. */
+  licence: (license: string) => call<{ match: DirectoryCentre | null }>('GET', `/admin/directory/licence?${qs({ license })}`),
+};
+
+/** A Google Maps link for a centre: exact point when the file has coordinates, otherwise its address. */
+export const mapsUrl = (c: Pick<DirectoryCentre, 'lat' | 'lng' | 'name' | 'address' | 'city' | 'state'>) =>
+  c.lat != null && c.lng != null
+    ? `https://www.google.com/maps/search/?api=1&query=${c.lat},${c.lng}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([c.name, c.address, c.city, c.state].filter(Boolean).join(', '))}`;
