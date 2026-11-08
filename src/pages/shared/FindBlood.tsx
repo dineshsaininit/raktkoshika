@@ -6,6 +6,7 @@ import type { BloodGroup, Component } from '../../data/types';
 import { useStore } from '../../store/store';
 import { apiMode, directory, ERAKTKOSH_URL, type DirectoryCentre } from '../../api/client';
 import { directionsUrl, distanceKm, fmtKm, locate, type Here } from '../../ui/geo';
+import { CentresMap, type MapPoint } from '../../ui/CentresMap';
 import { useRole } from '../../layouts/Shell';
 import { Badge, Empty, gl, Notice, PageHead } from '../../ui/kit';
 
@@ -29,7 +30,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
   // Licensed centres from the government directory near the person, for places the network does not cover yet.
   useEffect(() => {
     if (!here || !apiMode) { setOthers([]); return; }
-    directory.nearby(here.lat, here.lng, 8).then((r) => setOthers(r.filter((c) => !c.onNetwork))).catch(() => setOthers([]));
+    directory.nearby(here.lat, here.lng, 40).then((r) => setOthers(r.filter((c) => !c.onNetwork))).catch(() => setOthers([]));
   }, [here]);
 
   const whereAmI = here;
@@ -43,6 +44,19 @@ export function FindResults({ orderBase }: { orderBase: string }) {
     return list.sort((x, y) => (sort === 'near' ? (Number(y.exact > 0) - Number(x.exact > 0)) || x.km - y.km : y.exact - x.exact));
   }, [db.batches, db.banks, group, comp, sort, whereAmI]);
   const nearest = here ? rows.filter((r) => r.exact > 0).sort((a, b) => a.km - b.km)[0] : undefined;
+  const points = useMemo<MapPoint[]>(() => {
+    const net: (MapPoint & { km: number })[] = rows.filter((r) => r.b.lat != null && r.b.lng != null).map((r) => ({
+      id: r.b.id, kind: 'network', lat: r.b.lat!, lng: r.b.lng!, name: r.b.name, units: r.exact, km: r.km, phone: r.b.phone.replace(/\s/g, ''),
+      lines: [`${r.exact} unit${r.exact === 1 ? '' : 's'} of ${gl(group)} ${COMPONENTS[comp].short.toLowerCase()}`, `${r.b.city} · ${fmtKm(r.km)}${here ? '' : ' from Sangli'}`],
+      requestUrl: r.exact > 0 ? `#${orderBase}?group=${encodeURIComponent(group)}&component=${comp}&bank=${r.b.id}` : undefined,
+    }));
+    const dirPts: (MapPoint & { km: number })[] = others.filter((c) => c.lat != null && c.lng != null).map((c) => ({
+      id: `d${c.id}`, kind: 'directory', lat: c.lat!, lng: c.lng!, name: c.name, km: c.km,
+      phone: (c.phone || c.mobile).split(/[,/;]/)[0].replace(/[^\d+]/g, '') || undefined,
+      lines: [[c.city || c.district, c.state].filter(Boolean).join(', '), `${fmtKm(c.km)} away · stock: call or check e-RaktKosh`],
+    }));
+    return [...net, ...dirPts].sort((a, b) => a.km - b.km);
+  }, [rows, others, group, comp, here, orderBase]);
 
   const total = rows.reduce((s, r) => s + r.exact, 0);
   const alts = compatibleDonors(group, comp).filter((g) => g !== group);
@@ -75,6 +89,15 @@ export function FindResults({ orderBase }: { orderBase: string }) {
         </button>
       </div>
       {geoError && <Notice tone="warn">{geoError}</Notice>}
+
+      <section className="stack s" aria-label="Map">
+        <CentresMap points={points} here={here} />
+        <div className="map-legend">
+          <span><i style={{ background: '#C4283F' }} />Raktkoshika centre (number = units in stock)</span>
+          <span><i style={{ background: '#E8AE52' }} />Licensed centre near you (stock not on Raktkoshika)</span>
+          {here && <span><i style={{ background: '#1570B8' }} />You</span>}
+        </div>
+      </section>
 
       {nearest && nearest.b.lat != null && nearest.b.lng != null && (
         <section className="card pad stack s" style={{ borderColor: 'var(--brand)', boxShadow: '0 16px 40px -24px var(--brand)' }} aria-label="Nearest centre with stock">
@@ -147,7 +170,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
       {others.length > 0 && (
         <section className="card">
           <div className="card-head"><h3>Other licensed centres near you</h3><span className="xs faint">Government directory · stock not on Raktkoshika</span></div>
-          {others.map((c) => (
+          {others.slice(0, 8).map((c) => (
             <div className="list-row" key={c.id} style={{ flexWrap: 'wrap' }}>
               <div className="grow" style={{ minWidth: 200 }}>
                 <b style={{ fontSize: 14.5 }}>{c.name}</b>

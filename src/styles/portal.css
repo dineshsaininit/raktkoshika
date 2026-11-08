@@ -122,3 +122,19 @@
   .signin { padding: 20px 16px; border-radius: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .cells { display: none; } .pcard { transform: none !important; } }
+
+/* ---------- blood centre map ---------- */
+.centres-map { width: 100%; border-radius: var(--r-l); overflow: hidden; border: 1px solid var(--line); z-index: 0; background: var(--surface-3); }
+.pin { display: grid; place-items: center; }
+.pin.net { width: 38px; height: 46px; background: #C4283F; color: #fff; border: 3px solid #fff; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 6px 14px -4px rgba(0, 0, 0, .5); }
+.pin.net span { transform: rotate(45deg); font: 800 14px var(--display); }
+.pin.net.empty { background: #8A94A0; }
+.pin.dir { width: 16px; height: 16px; border-radius: 50%; background: #E8AE52; border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+.map-pop { font: 13px var(--body); min-width: 190px; color: #16202E; }
+.map-pop b { font-size: 14px; display: block; margin-bottom: 3px; }
+.map-pop div { color: #4A5563; }
+.map-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.map-btn { padding: 5px 10px; border-radius: 8px; border: 1px solid #D7CEC1; color: #16202E !important; text-decoration: none; font-weight: 600; font-size: 12.5px; }
+.map-btn.primary { background: #C4283F; border-color: #C4283F; color: #fff !important; }
+.map-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+.map-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line-2); }
