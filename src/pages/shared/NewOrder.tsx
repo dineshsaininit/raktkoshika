@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertOctagon, ArrowLeft, ArrowRight, CalendarPlus, Check, FileUp, MapPin, Phone, Trash2, Truck, Wallet } from 'lucide-react';
-import { compatibleDonors, COMPONENTS, COMPONENT_KEYS, fmtDT, inr, processingFee } from '../../data/rules';
+import { CHARGE_TYPES, compatibleDonors, COMPONENTS, COMPONENT_KEYS, fmtDT, inr, processingFee, unitCharge } from '../../data/rules';
+import type { ChargeType } from '../../data/types';
 import type { BloodGroup, Component } from '../../data/types';
 import { apiMode, uploadFile } from '../../api/client';
 import { useStore } from '../../store/store';
@@ -44,6 +45,7 @@ export function NewOrder() {
   const [bankId, setBankId] = useState(params.get('bank') ?? '');
   const [fulfilment, setFulfilment] = useState<'collect' | 'delivery'>('collect');
   const [method, setMethod] = useState<'wallet' | 'counter'>('wallet');
+  const [chargeType, setChargeType] = useState<ChargeType>('standard');
   const [credits, setCredits] = useState(0);
   const [topUp, setTopUp] = useState(false);
 
@@ -51,7 +53,7 @@ export function NewOrder() {
   const centres = useMemo(() => db.banks.filter((b) => b.verified).map((b) => ({ b, n: count(b.id) })).sort((x, y) => Number(y.n >= units) - Number(x.n >= units) || x.b.km - y.b.km), [db.batches, db.banks, group, comp, units]); // eslint-disable-line
   const bestBank = centres.find((c) => c.n >= units)?.b;
   const bank = db.banks.find((b) => b.id === bankId) ?? bestBank;
-  const fee = bank ? processingFee(comp, bank) : 0;
+  const fee = bank ? unitCharge(comp, bank, chargeType) : 0;
   const multi = mode === 'schedule' ? dates.length : 1;
   const maxCredits = Math.min(wallet.credits, units * multi);
   const creditsApplied = Math.min(credits, maxCredits);
@@ -94,7 +96,7 @@ export function NewOrder() {
           ownerId: me, actor: persona.org, kind: mode === 'book' ? 'booking' : 'order', urgency: sos ? 'sos' : 'routine',
           patient: { name: patient.name, age: Number(patient.age) || 0, hospital: patient.hospital, ward: patient.ward || 'Not specified', doctor: patient.doctor },
           group, component: comp, units, bankId: bank.id, scheduledFor: when ? new Date(when).toISOString() : undefined,
-          fulfilment, rx, rxFileId: rxFileId || undefined, method, creditsToUse: use,
+          fulfilment, rx, rxFileId: rxFileId || undefined, method, creditsToUse: use, chargeType,
         }));
       }
     } catch (e) {
@@ -222,6 +224,21 @@ export function NewOrder() {
             </div>
             <hr className="divider" />
             <div className="field">
+              <span className="label">Charges at {bank.name}</span>
+              <div className="grid g3" style={{ gap: 10 }}>
+                {(Object.keys(CHARGE_TYPES) as ChargeType[]).map((t) => (
+                  <button key={t} type="button" className={`choice ${chargeType === t ? 'on' : ''}`} onClick={() => setChargeType(t)} aria-pressed={chargeType === t}>
+                    <span className="tick" />
+                    <span><b>{CHARGE_TYPES[t].label}</b><span className="xs muted" style={{ display: 'block' }}>{CHARGE_TYPES[t].desc}</span><b className="num" style={{ display: 'block', marginTop: 4 }}>{inr(unitCharge(comp, bank, t))} per unit</b></span>
+                  </button>
+                ))}
+              </div>
+              {chargeType === 'replacement' && <span className="help">After placing the request, book your donor at one of the centre’s fixed replacement times: {(bank.replacementSlots ?? []).join(', ')}.</span>}
+              {chargeType === 'self_donor' && <span className="help">Your donor’s blood is screened (ELISA) before use. Only the test charge is taken; bring your donor to the centre.</span>}
+            </div>
+            {mode !== 'now' && <Notice tone="info">{mode === 'book' ? 'Booked' : 'Scheduled'} units are held for <b>{bank.holdHours ?? 24} hours</b> from the time you choose. If they are not collected by then, the booking ends and your money comes back.</Notice>}
+            {bank.bookings24x7 === false && <Notice tone="warn">{bank.name} takes bookings during working hours only. Choose another centre for a booking at night.</Notice>}
+            <div className="field">
               <span className="label">Pay with</span>
               <div className="grid g2" style={{ gap: 10 }}>
                 <button className={`choice ${method === 'wallet' ? 'on' : ''}`} onClick={() => setMethod('wallet')}><span className="tick" /><span><b>Raktkoshika wallet</b><span className="xs muted" style={{ display: 'block' }}>{inr(wallet.balance)} available. Held now, charged at issue.</span></span></button>
@@ -235,7 +252,7 @@ export function NewOrder() {
               </div>
             )}
             <div className="stack s">
-              <div className="row between small"><span className="muted">Processing charge ({units * multi} × {inr(fee)})</span><span className="num">{inr(total)}</span></div>
+              <div className="row between small"><span className="muted">{CHARGE_TYPES[chargeType].label} ({units * multi} × {inr(fee)})</span><span className="num">{inr(total)}</span></div>
               {creditsApplied > 0 && <div className="row between small"><span className="muted">Donor credits ({creditsApplied})</span><span className="num" style={{ color: 'var(--good)' }}>{inr(-creditsApplied * fee)}</span></div>}
               <div className="row between small"><span className="muted">Platform fee on blood</span><span className="num">₹0</span></div>
               <hr className="divider" />

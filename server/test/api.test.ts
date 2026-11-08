@@ -11,6 +11,7 @@ import { DEMO_ACCOUNTS } from '../../src/data/demoAccounts.ts';
 import { createApp } from '../src/app.ts';
 import { connectDb, disconnectDb, one, q } from '../src/db.ts';
 import { seedDatabase } from '../src/services/seed.ts';
+import { expireBookings } from '../src/services/orders.ts';
 
 const main = process.env.DATABASE_URL ?? '';
 const testUrl = process.env.TEST_DATABASE_URL ?? main.replace(/\/([^/?]+)(\?|$)/, (_m, name: string, q: string) => `/${name}_test${q}`);
@@ -298,5 +299,74 @@ describe('government directory', () => {
     const m = (await request(app).get('/api/admin/directory/licence?license=kop/test/9').set(as('a1'))).body.match;
     assert.equal(m.name, 'Test Taluka Blood Centre');
     assert.equal((await request(app).get('/api/admin/directory/licence?license=NOPE').set(as('a1'))).body.match, null);
+  });
+});
+
+describe('charges, bookings, replacement donors and bags', () => {
+  before(async () => {
+    await request(app).post('/api/admin/reset').set(as('a1'));
+    // Riya (female, last donated 130 days ago) can donate; give her wallet room for these tests.
+    await request(app).post('/api/wallet/topup').set(as('u1')).send({ amount: 20000, method: 'UPI' });
+  });
+  it('charges the centre’s replacement rate and the ELISA charge for a self donor', async () => {
+    const rep = await request(app).post('/api/orders').set(as('u1')).send(order({ chargeType: 'replacement' }));
+    assert.equal(rep.status, 201, rep.text);
+    assert.equal(rep.body.payment.fee, 1050);
+    assert.equal(rep.body.chargeType, 'replacement');
+    const self = await request(app).post('/api/orders').set(as('u1')).send(order({ chargeType: 'self_donor' }));
+    assert.equal(self.body.payment.fee, 650);
+    const std = await request(app).post('/api/orders').set(as('u1')).send(order());
+    assert.equal(std.body.payment.fee, 1550);
+  });
+  it('a centre sets its own rates, which never exceed the standard charge', async () => {
+    assert.equal((await request(app).post('/api/bank/settings').set(as('b1')).send({ elisaFee: 9999, replacementFees: { PRBC: 900 }, holdHours: 6, replacementSlots: ['10:00 am', '5:00 pm'] })).status, 200);
+    const o = await request(app).post('/api/orders').set(as('u1')).send(order({ chargeType: 'self_donor' }));
+    assert.equal(o.body.payment.fee, 1550, 'ELISA charge above the processing charge is capped');
+    assert.equal((await request(app).post('/api/orders').set(as('u1')).send(order({ chargeType: 'replacement' }))).body.payment.fee, 900);
+    assert.equal((await request(app).post('/api/bank/settings').set(as('b2')).send({ bankId: 'b1', elisaFee: 1 })).status, 403, 'other centres cannot change it');
+    assert.equal((await request(app).post('/api/bank/settings').set(as('b1')).send({ replacementSlots: ['soon'] })).status, 400);
+  });
+  it('a booking holds units for the centre’s fixed duration, then expires and refunds', async () => {
+    const when = new Date(Date.now() - 7 * 36e5).toISOString(); // booked for 7 hours ago, hold is 6 hours
+    const b = await request(app).post('/api/orders').set(as('u1')).send(order({ kind: 'booking', scheduledFor: when }));
+    assert.equal(b.status, 201, b.text);
+    assert.ok(b.body.holdUntil);
+    const before = (await dbOf('u1')).wallets.u1;
+    const n = await expireBookings();
+    assert.ok(n >= 1);
+    const o = (await request(app).get(`/api/orders/${b.body.id}`).set(as('u1'))).body;
+    assert.equal(o.stage, 'cancelled');
+    const after = (await dbOf('u1')).wallets.u1;
+    assert.equal(after.balance, before.balance + 1550);
+  });
+  it('replacement donors book only the centre’s fixed times, for their own order', async () => {
+    const o = (await request(app).post('/api/orders').set(as('u1')).send(order({ chargeType: 'replacement' }))).body;
+    const at = new Date(Date.now() + 864e5).toISOString();
+    assert.equal((await request(app).post('/api/donations').set(as('u1')).send({ bankId: 'b1', date: at, slot: '11:30 am', kind: 'replacement', orderId: o.id })).status, 400);
+    assert.equal((await request(app).post('/api/donations').set(as('u1')).send({ bankId: 'b2', date: at, slot: '10:00 am', kind: 'replacement', orderId: o.id })).status, 400);
+    const ok = await request(app).post('/api/donations').set(as('u1')).send({ bankId: 'b1', date: at, slot: '10:00 am', kind: 'replacement', orderId: o.id });
+    assert.equal(ok.status, 201, ok.text);
+    assert.equal(ok.body.kind, 'replacement');
+    assert.equal(ok.body.orderId, o.id);
+  });
+  it('recording a donation uses one bag, and runs out cleanly', async () => {
+    const bagsOf = async () => (await dbOf('b1')).bags.find((g: { type: string }) => g.type === 'Penta').units;
+    const start = await bagsOf();
+    assert.equal((await request(app).post('/api/donations/D-841/record').set(as('b1')).send({ hb: 13.4, bagType: 'Penta' })).status, 200);
+    assert.equal(await bagsOf(), start - 1);
+    assert.equal((await request(app).post('/api/bank/bags').set(as('b1')).send({ bagType: 'Penta', delta: -(start - 1) })).status, 200);
+    assert.equal((await request(app).post('/api/donations/D-842/record').set(as('b1')).send({ hb: 13.4, bagType: 'Penta' })).status, 409);
+    assert.equal((await request(app).post('/api/bank/bags').set(as('b1')).send({ bagType: 'Penta', delta: -1 })).status, 409);
+    assert.equal((await request(app).post('/api/bank/bags').set(as('b1')).send({ bagType: 'Penta', delta: 25 })).status, 200);
+  });
+  it('finds a place by PIN code or city for people without location access', async () => {
+    const pin = await request(app).get('/api/public/locate?q=416416');
+    assert.equal(pin.status, 200, pin.text);
+    assert.ok(pin.body.lat > 16 && pin.body.lat < 18);
+    assert.equal((await request(app).get('/api/public/locate?q=Nowhereville')).status, 404);
+    const near = (await request(app).get(`/api/public/directory/nearby?lat=${pin.body.lat}&lng=${pin.body.lng}&limit=1`)).body[0];
+    const one = await request(app).get(`/api/public/directory/centre/${near.id}`);
+    assert.equal(one.status, 200);
+    assert.equal(one.body.name, near.name);
   });
 });

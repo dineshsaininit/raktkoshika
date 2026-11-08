@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { BloodGroup, Camp, Component, DB, DonorRequest, LeadStage, Notice, Order, Role, Stage, Wallet } from '../data/types';
-import { COMPONENTS, MIN_HB, processingFee, uid } from '../data/rules';
+import type { BloodGroup, Camp, Component, DB, DonorRequest, LeadStage, Notice, Order, Role, Stage, Wallet, Bank, BagType, ChargeType } from '../data/types';
+import { COMPONENTS, MIN_HB, unitCharge, uid } from '../data/rules';
 import { makeSeed } from '../data/seed';
 import { apiMode, call, fetchDb, fetchPublic, logout, SignedOut, subscribe, selectSession } from '../api/client';
 
@@ -14,7 +14,7 @@ const now = () => new Date().toISOString();
 export interface NewOrder {
   ownerId: string; actor: string; kind: 'order' | 'booking'; urgency: 'sos' | 'routine'; patient: Order['patient'];
   group: BloodGroup; component: Component; units: number; bankId: string; scheduledFor?: string; fulfilment: 'collect' | 'delivery';
-  rx: string; rxFileId?: string; method: 'wallet' | 'counter'; creditsToUse: number; seriesId?: string;
+  rx: string; rxFileId?: string; method: 'wallet' | 'counter'; creditsToUse: number; seriesId?: string; chargeType?: ChargeType;
 }
 
 function ledger(w: Wallet, kind: Wallet['ledger'][number]['kind'], amount: number, credits: number, note: string, ref?: string) {
@@ -51,7 +51,7 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
       const id = `RK-${Math.floor(20500 + Math.random() * 9000)}`;
       setDb((d) => {
         const bank = d.banks.find((b) => b.id === input.bankId)!;
-        const fee = processingFee(input.component, bank);
+        const fee = unitCharge(input.component, bank, input.chargeType);
         const creditsUsed = Math.min(input.creditsToUse, input.units);
         const cash = (input.units - creditsUsed) * fee;
         const w = ensureWallet(d, input.ownerId);
@@ -65,7 +65,8 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
         }
         d.orders.unshift({
           id, ownerId: input.ownerId, kind: input.kind, urgency: input.urgency, patient: input.patient, group: input.group, component: input.component,
-          units: input.units, bankId: input.bankId, scheduledFor: input.scheduledFor, seriesId: input.seriesId, fulfilment: input.fulfilment, rx: input.rx, rxFileId: input.rxFileId, stage: 'placed',
+          units: input.units, bankId: input.bankId, scheduledFor: input.scheduledFor, seriesId: input.seriesId, fulfilment: input.fulfilment, rx: input.rx, rxFileId: input.rxFileId, chargeType: input.chargeType ?? 'standard', stage: 'placed',
+holdUntil: input.kind === 'booking' ? new Date(new Date(input.scheduledFor ?? Date.now()).getTime() + (bank.holdHours ?? 24) * 36e5).toISOString() : undefined,
           events: [{ stage: 'placed', at: now() }], payment: { method: input.method, fee, total: fee * input.units, creditsUsed, cash, settled: false },
         });
         notify(d, 'bank', `${input.urgency === 'sos' ? 'SOS: ' : ''}${input.units} unit${input.units > 1 ? 's' : ''} ${input.group} ${COMPONENTS[input.component].short}`, `${input.patient.hospital} · ${id}`, input.urgency === 'sos' ? 'crit' : 'info', 'requests');
@@ -157,10 +158,10 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
     },
     updateProfile(patch: Partial<DB['profile']>) { setDb((d) => { Object.assign(d.profile, patch); }); },
 
-    bookDonation(bankId: string, date: string, slot: string, campId?: string) {
+    bookDonation(bankId: string, date: string, slot: string, campId?: string, kind: 'voluntary' | 'replacement' = 'voluntary', orderId?: string) {
       const id = uid('D');
       setDb((d) => {
-        d.donations.unshift({ id, donorId: 'u1', donorName: d.profile.name, group: d.profile.group, bankId, date, slot, status: 'booked', campId });
+        d.donations.unshift({ id, donorId: 'u1', donorName: d.profile.name, group: d.profile.group, bankId, date, slot, status: 'booked', campId, kind, orderId });
         const camp = d.camps.find((c) => c.id === campId);
         if (camp) camp.registered += 1;
         notify(d, 'bank', 'New donor slot booked', `${d.profile.name} · ${d.profile.group} · ${slot}`, 'info', 'donors');
@@ -170,7 +171,7 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
     },
     cancelDonation(id: string) { setDb((d) => { const x = d.donations.find((v) => v.id === id); if (x) x.status = 'cancelled'; }); },
 
-    recordDonation(id: string, hb: number, actor: string) {
+    recordDonation(id: string, hb: number, actor: string, bagType?: BagType) {
       setDb((d) => {
         const x = d.donations.find((v) => v.id === id);
         if (!x) return;
@@ -181,7 +182,9 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
           audit(d, actor, 'Deferred donor', id);
           return;
         }
-        x.status = 'completed'; x.date = now();
+        x.status = 'completed'; x.date = now(); x.bagType = bagType;
+        const bag = bagType && d.bags?.find((g) => g.bankId === x.bankId && g.type === bagType);
+        if (bag) bag.units = Math.max(0, bag.units - 1);
         if (x.donorId === 'u1') d.profile.lastDonation = now();
         // New units wait in quarantine until screening clears them.
         (['PRBC', 'FFP'] as Component[]).forEach((c) => {
@@ -275,6 +278,17 @@ function useActions(setDb: (fn: (d: DB) => void) => void) {
         audit(d, 'Dr. Meera Patil', 'Invited referral', name);
       });
     },
+    updateSettings(bankId: string, patch: Partial<Pick<Bank, 'replacementFees' | 'elisaFee' | 'holdHours' | 'replacementSlots' | 'bookings24x7'>>) {
+      setDb((d) => { const b = d.banks.find((x) => x.id === bankId); if (b) Object.assign(b, patch); });
+    },
+    adjustBags(bankId: string, type: BagType, delta: number) {
+      setDb((d) => {
+        d.bags ??= [];
+        let g = d.bags.find((x) => x.bankId === bankId && x.type === type);
+        if (!g) { g = { bankId, type, units: 0 }; d.bags.push(g); }
+        g.units = Math.max(0, g.units + delta);
+      });
+    },
     addExpense(head: string, amount: number) {
       setDb((d) => { d.accounts.unshift({ id: uid('A'), bankId: 'b1', at: now(), kind: 'expense', head, amount }); });
     },
@@ -333,9 +347,11 @@ const remote: Remote = {
   giftCredit: (_r, _owner, member) => call('POST', '/wallet/gift-credit', { member }),
   addFamily: (_r, name, relation, group) => call('POST', '/profile/family', { name, relation, group }),
   updateProfile: (_r, patch) => patchProfile(patch),
-  bookDonation: (id, bankId, date, slot, campId) => call('POST', '/donations', { id, bankId, date, slot, campId }),
+  bookDonation: (id, bankId, date, slot, campId, kind, orderId) => call('POST', '/donations', { id, bankId, date, slot, campId, kind, orderId }),
   cancelDonation: (_r, id) => call('POST', `/donations/${id}/cancel`),
-  recordDonation: (_r, id, hb) => call('POST', `/donations/${id}/record`, { hb }),
+  recordDonation: (_r, id, hb, _actor, bagType) => call('POST', `/donations/${id}/record`, { hb, bagType }),
+  updateSettings: (_r, bankId, patch) => call('POST', '/bank/settings', { bankId, ...patch }),
+  adjustBags: (_r, bankId, bagType, delta) => call('POST', '/bank/bags', { bankId, bagType, delta }),
   releaseQuarantine: (_r, ids) => call('POST', '/stock/release', { ids }),
   discard: (_r, id, reason) => call('POST', `/stock/${id}/discard`, { reason }),
   transfer: (_r, id, toBank) => call('POST', `/stock/${id}/transfer`, { toBank }),

@@ -67,19 +67,30 @@ export async function addFamily(m: Me, name: string, relation: string, group: Bl
 
 /* ---------- Donations ---------- */
 
-export async function bookDonation(m: Me, input: { id?: string; bankId: string; date: string; slot: string; campId?: string }) {
+export async function bookDonation(m: Me, input: { id?: string; bankId: string; date: string; slot: string; campId?: string; kind?: 'voluntary' | 'replacement'; orderId?: string }) {
   const p = await getProfile(m);
   const wait = daysUntilEligible({ sex: p.sex, lastDonation: p.lastDonation });
   if (wait > 0) throw conflict(`You can donate again in ${wait} days`);
+  const kind = input.kind ?? 'voluntary';
   const id = await tx(async (c) => {
-    if (!(await one('select 1 from banks where id = $1', [input.bankId], c))) throw notFound('Blood centre not found');
+    const bank = await one('select id, replacement_slots from banks where id = $1', [input.bankId], c);
+    if (!bank) throw notFound('Blood centre not found');
+    if (kind === 'replacement') {
+      // Replacement donors come at the blood centre's fixed times, for one of the donor's own open orders.
+      if (!input.orderId) throw badRequest('Choose the order this replacement donation is for');
+      const o = await one('select owner_id, bank_id, stage from orders where id = $1', [input.orderId], c);
+      if (!o || o.owner_id !== m.id) throw notFound('Order not found');
+      if (o.bank_id !== input.bankId) throw badRequest('A replacement donor gives at the same centre that is issuing the blood');
+      if (['completed', 'rejected', 'cancelled'].includes(o.stage)) throw conflict('That order is already closed');
+      if (!(bank.replacement_slots ?? []).includes(input.slot)) throw badRequest(`Replacement donors can come only at: ${(bank.replacement_slots ?? []).join(', ')}`);
+    }
     if (await one(`select 1 from donations where donor_id = $1 and status = 'booked'`, [m.id], c)) throw conflict('You already have a slot booked. Cancel it first to pick another.');
     if (input.campId && !(await run(`update camps set registered = registered + 1 where id = $1 and status = 'accepted'`, [input.campId], c))) {
       throw conflict('This camp is not open for registration');
     }
     const id = input.id && !(await one('select 1 from donations where id = $1', [input.id], c)) ? input.id : uid('D');
-    await q(`insert into donations (id, donor_id, donor_name, grp, bank_id, date, slot, status, camp_id) values ($1,$2,$3,$4,$5,$6,$7,'booked',$8)`,
-      [id, m.id, p.name, p.group, input.bankId, input.date, input.slot, input.campId ?? null], c);
+    await q(`insert into donations (id, donor_id, donor_name, grp, bank_id, date, slot, status, camp_id, kind, order_id) values ($1,$2,$3,$4,$5,$6,$7,'booked',$8,$9,$10)`,
+      [id, m.id, p.name, p.group, input.bankId, input.date, input.slot, input.campId ?? null, kind, kind === 'replacement' ? input.orderId : null], c);
     await notify('bank', 'New donor slot booked', `${p.name} · ${p.group} · ${input.slot}`, 'info', 'donors', input.bankId, c);
     await audit(m.name, 'Booked donation slot', id, c);
     return id;
@@ -99,7 +110,7 @@ export async function cancelDonation(m: Me, id: string) {
 }
 
 /** Records a donation at the centre. Low haemoglobin defers the donor; otherwise units enter quarantine and the donor earns a credit. */
-export async function recordDonation(m: Me, id: string, hb: number) {
+export async function recordDonation(m: Me, id: string, hb: number, bagType?: string) {
   await tx(async (c) => {
     const d = await one('select * from donations where id = $1 for update', [id], c);
     if (!d) throw notFound('Donation not found');
@@ -113,7 +124,12 @@ export async function recordDonation(m: Me, id: string, hb: number) {
       await audit(m.name, 'Deferred donor', id, c);
       return;
     }
-    await q(`update donations set status = 'completed', hb = $2, date = now() where id = $1`, [id, hb], c);
+    // Each collection uses one empty blood bag of the chosen type from the centre's stock.
+    if (bagType) {
+      const used = await run('update bag_stock set units = units - 1 where bank_id = $1 and bag_type = $2 and units > 0', [d.bank_id, bagType], c);
+      if (!used) throw conflict(`No ${bagType.toLowerCase()} bags left. Add bag stock first, or choose another bag type.`);
+    }
+    await q(`update donations set status = 'completed', hb = $2, date = now(), bag_type = $3 where id = $1`, [id, hb, bagType ?? null], c);
     await q('update profiles set last_donation = now() where id = $1', [d.donor_id], c);
 
     // New units wait in quarantine until screening clears them.
@@ -195,4 +211,37 @@ export async function readFile(m: Me, id: string) {
     if (!o || !(m.role === 'bank' && m.centres.includes(o.bank_id))) throw forbidden();
   }
   return f as { name: string; mime: string; data: Buffer };
+}
+
+/* ---------- Centre charges, booking rules and blood-bag stock ---------- */
+
+export interface CentreSettings {
+  bankId?: string; replacementFees?: Record<string, number>; elisaFee?: number | null; holdHours?: number; replacementSlots?: string[]; bookings24x7?: boolean;
+}
+
+/** A centre sets its own replacement and ELISA charges (capped at the standard processing charge when used), booking hold time and replacement-donor times. */
+export async function updateSettings(m: Me, s: CentreSettings) {
+  const bankId = s.bankId ?? m.centres[0] ?? m.id;
+  assertCentre(m, bankId);
+  const sets: string[] = [];
+  const params: unknown[] = [bankId];
+  const put = (col: string, v: unknown) => { params.push(v); sets.push(`${col} = $${params.length}`); };
+  if (s.replacementFees) put('replacement_fees', JSON.stringify(s.replacementFees));
+  if (s.elisaFee !== undefined) put('elisa_fee', s.elisaFee);
+  if (s.holdHours !== undefined) put('hold_hours', s.holdHours);
+  if (s.replacementSlots) put('replacement_slots', s.replacementSlots);
+  if (s.bookings24x7 !== undefined) put('bookings_24x7', s.bookings24x7);
+  if (!sets.length) return;
+  await q(`update banks set ${sets.join(', ')} where id = $1`, params);
+  await audit(m.name, 'Updated charges and booking rules', bankId);
+}
+
+export async function adjustBags(m: Me, bagType: string, delta: number, bankId = m.centres[0] ?? m.id) {
+  assertCentre(m, bankId);
+  await tx(async (c) => {
+    await q('insert into bag_stock (bank_id, bag_type, units) values ($1, $2, 0) on conflict do nothing', [bankId, bagType], c);
+    const n = await run('update bag_stock set units = units + $3 where bank_id = $1 and bag_type = $2 and units + $3 >= 0', [bankId, bagType, delta], c);
+    if (!n) throw conflict('Bag stock cannot go below zero');
+    await audit(m.name, `${delta > 0 ? 'Added' : 'Removed'} ${Math.abs(delta)} ${bagType.toLowerCase()} bag(s)`, bankId, c);
+  });
 }

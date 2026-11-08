@@ -37,6 +37,20 @@ create table if not exists banks (
 create index if not exists banks_parent on banks(parent_id);
 alter table banks add column if not exists lat double precision;
 alter table banks add column if not exists lng double precision;
+-- Each centre's own rates and rules. NULL means "use the standard processing charge".
+alter table banks add column if not exists replacement_fees jsonb not null default '{}'; -- per component, when a replacement donor is given
+alter table banks add column if not exists elisa_fee integer;                          -- per unit, when the family brings its own (self) donor
+alter table banks add column if not exists hold_hours integer not null default 24;     -- how long a booking keeps units
+alter table banks add column if not exists replacement_slots text[] not null default '{9:30 am,11:00 am,12:30 pm,4:00 pm}';
+alter table banks add column if not exists bookings_24x7 boolean not null default true;
+
+-- Empty blood bags on the centre's shelf, by type. Recording a donation uses one.
+create table if not exists bag_stock (
+  bank_id text not null references banks(id) on delete cascade,
+  bag_type text not null check (bag_type in ('Single','Double','Triple','Quadruple','Penta')),
+  units integer not null default 0 check (units >= 0),
+  primary key (bank_id, bag_type)
+);
 
 create table if not exists files (
   id         text primary key,
@@ -178,6 +192,11 @@ create table if not exists donations (
 );
 create index if not exists donations_bank on donations(bank_id, date desc);
 create index if not exists donations_donor on donations(donor_id);
+alter table donations add column if not exists kind text not null default 'voluntary';   -- voluntary | replacement
+alter table donations add column if not exists order_id text;                             -- the order a replacement donor gives for
+alter table donations add column if not exists bag_type text;
+alter table orders add column if not exists charge_type text not null default 'standard'; -- standard | replacement | self_donor
+alter table orders add column if not exists hold_until timestamptz;                       -- bookings expire after this
 
 create table if not exists donor_requests (
   id          text primary key,
@@ -353,7 +372,7 @@ create index if not exists directory_license on directory_centres(lower(license)
 
 /** Every table, children before parents, for wiping during a reset. */
 export const TABLES = [
-  'messages', 'threads', 'order_events', 'batches', 'donations', 'family_members', 'profiles', 'orders', 'files', 'camps', 'donor_requests',
+  'bag_stock', 'messages', 'threads', 'order_events', 'batches', 'donations', 'family_members', 'profiles', 'orders', 'files', 'camps', 'donor_requests',
   'notices', 'referrals', 'account_entries', 'applications', 'leads', 'tickets', 'audit', 'plans', 'month_stats', 'sensors', 'ledger', 'wallets',
   'banks', 'users',
 ];

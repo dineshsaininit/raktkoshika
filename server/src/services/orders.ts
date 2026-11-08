@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import type { BloodGroup, Component, Stage } from '../../../src/data/types.ts';
-import { COMPONENTS, processingFee, uid } from '../../../src/data/rules.ts';
+import { COMPONENTS, unitCharge, uid } from '../../../src/data/rules.ts';
 import { db, one, q, run, tx, type Db } from '../db.ts';
 import { actor, assertCentre, type Me } from '../lib/auth.ts';
 import { badRequest, conflict, forbidden, notFound, paymentRequired } from '../lib/http.ts';
@@ -12,6 +12,7 @@ export interface NewOrderInput {
   patient: { name: string; age: number; hospital: string; ward: string; doctor: string };
   group: BloodGroup; component: Component; units: number; bankId: string; scheduledFor?: string; seriesId?: string;
   fulfilment: 'collect' | 'delivery'; rx: string; rxFileId?: string; method: 'wallet' | 'counter'; creditsToUse: number;
+  chargeType?: 'standard' | 'replacement' | 'self_donor';
 }
 
 const FLOW: Stage[] = ['placed', 'rx_verified', 'sample_received', 'crossmatched', 'issued', 'completed'];
@@ -45,7 +46,11 @@ export async function placeOrder(m: Me, input: NewOrderInput) {
     if (input.rxFileId && !(await one('select 1 from files where id = $1 and owner_id = $2', [input.rxFileId, m.id], c))) throw badRequest('Prescription file not found');
 
     const id = await freshOrderId(c, input.id);
-    const fee = processingFee(input.component, bank as { type: 'Government' | 'Charitable' | 'Private' });
+    const chargeType = input.chargeType ?? 'standard';
+    // The centre's own rate for this way of paying, never above the standard processing charge.
+    const fee = unitCharge(input.component, { type: bank.type, replacementFees: bank.replacement_fees, elisaFee: bank.elisa_fee ?? undefined }, chargeType);
+    // A booking keeps its units for the centre's fixed duration, counted from the time it is booked for.
+    const holdUntil = input.kind === 'booking' ? new Date(new Date(input.scheduledFor ?? Date.now()).getTime() + (bank.hold_hours ?? 24) * 36e5).toISOString() : null;
     const creditsUsed = Math.min(input.creditsToUse, input.units);
     const cash = (input.units - creditsUsed) * fee;
 
@@ -57,11 +62,11 @@ export async function placeOrder(m: Me, input: NewOrderInput) {
       [m.id, input.method === 'wallet' ? cash : 0, creditsUsed], c);
 
     await q(`insert into orders (id, owner_id, kind, urgency, patient_name, patient_age, hospital, ward, doctor, grp, component, units, bank_id, scheduled_for,
-      series_id, fulfilment, rx, rx_file_id, stage, pay_method, fee, total, credits_used, cash, settled)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'placed',$19,$20,$21,$22,$23,false)`,
+      series_id, fulfilment, rx, rx_file_id, stage, pay_method, fee, total, credits_used, cash, settled, charge_type, hold_until)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'placed',$19,$20,$21,$22,$23,false,$24,$25)`,
       [id, m.id, input.kind, input.urgency, input.patient.name, input.patient.age, input.patient.hospital, input.patient.ward, input.patient.doctor,
         input.group, input.component, input.units, input.bankId, input.scheduledFor ?? null, input.seriesId ?? null, input.fulfilment, input.rx,
-        input.rxFileId ?? null, input.method, fee, fee * input.units, creditsUsed, cash], c);
+        input.rxFileId ?? null, input.method, fee, fee * input.units, creditsUsed, cash, chargeType, holdUntil], c);
     await q('insert into order_events (order_id, stage) values ($1, $2)', [id, 'placed'], c);
 
     if (input.method === 'wallet' && cash) await ledger(m.id, 'hold', -cash, 0, `Held for order ${id}`, id, c);
@@ -184,4 +189,20 @@ export async function reportReaction(m: Me, id: string, text: string) {
     await audit(actor(m), 'Reported transfusion reaction', id, c);
   });
   return getOrder(id);
+}
+
+/** Bookings keep units only for the centre's fixed duration. Past that, they are cancelled and the money returned. */
+export async function expireBookings() {
+  const due = await q<{ id: string; owner_id: string }>(`select id, owner_id from orders where kind = 'booking' and hold_until < now()
+    and stage in ('placed', 'rx_verified', 'sample_received', 'crossmatched')`);
+  const system: Me = { id: 'system', role: 'admin', name: 'System', org: 'Raktkoshika', initials: 'RK', phone: '', centres: [] };
+  for (const o of due) {
+    try {
+      await closeOrder(system, o.id, 'cancelled', 'The booking time ended before the units were collected');
+      await notify(await roleOf(o.owner_id), `Booking ended · ${o.id}`, 'The booking time is over, so the units went back to stock. Any held money and credits are back in your wallet.', 'warn', `orders/${o.id}`, o.owner_id);
+    } catch (e) {
+      console.warn(`[bookings] could not expire ${o.id}: ${(e as Error).message}`);
+    }
+  }
+  return due.length;
 }

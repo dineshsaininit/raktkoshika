@@ -60,9 +60,10 @@ export async function seedDatabase() {
 
     // Parents first, so branch centres can point at them.
     const banks = [...d.banks].sort((a, b) => Number(!!a.parentId) - Number(!!b.parentId));
-    await insert(c, 'banks', ['id', 'name', 'city', 'district', 'type', 'license', 'km', 'rating', 'open24', 'verified', 'sync_min', 'parent_id', 'phone', 'lat', 'lng', 'created_at'],
-      banks.map((b, i) => [b.id, b.name, b.city, b.district, b.type, b.license, b.km, b.rating, b.open24, b.verified, b.syncMin, b.parentId, b.phone, b.lat, b.lng, iso(-400 + i)]));
+    await insert(c, 'banks', ['id', 'name', 'city', 'district', 'type', 'license', 'km', 'rating', 'open24', 'verified', 'sync_min', 'parent_id', 'phone', 'lat', 'lng', 'replacement_fees', 'elisa_fee', 'hold_hours', 'replacement_slots', 'bookings_24x7', 'created_at'],
+      banks.map((b, i) => [b.id, b.name, b.city, b.district, b.type, b.license, b.km, b.rating, b.open24, b.verified, b.syncMin, b.parentId, b.phone, b.lat, b.lng, JSON.stringify(b.replacementFees ?? {}), b.elisaFee, b.holdHours ?? 24, b.replacementSlots ?? [], b.bookings24x7 ?? true, iso(-400 + i)]));
 
+    await insert(c, 'bag_stock', ['bank_id', 'bag_type', 'units'], (d.bags ?? []).map((g) => [g.bankId, g.type, g.units]));
     await insert(c, 'orders', ['id', 'owner_id', 'kind', 'urgency', 'patient_name', 'patient_age', 'hospital', 'ward', 'doctor', 'grp', 'component', 'units', 'bank_id',
       'scheduled_for', 'series_id', 'fulfilment', 'rx', 'stage', 'pay_method', 'fee', 'total', 'credits_used', 'cash', 'settled', 'reaction', 'created_at'],
     d.orders.map((o) => [o.id, o.ownerId, o.kind, o.urgency, o.patient.name, o.patient.age, o.patient.hospital, o.patient.ward, o.patient.doctor, o.group, o.component,

@@ -10,6 +10,8 @@ import { CentresMap, type MapPoint } from '../../ui/CentresMap';
 import { useRole } from '../../layouts/Shell';
 import { Badge, Empty, gl, Notice, PageHead } from '../../ui/kit';
 
+const NEAR_KM = 75;
+
 export function FindResults({ orderBase }: { orderBase: string }) {
   const { db } = useStore();
   const [params] = useSearchParams();
@@ -19,6 +21,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
   const [here, setHere] = useState<Here | null>(null);
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState('');
+  const [place, setPlace] = useState('');
   const [others, setOthers] = useState<(DirectoryCentre & { km: number })[]>([]);
 
   const findMe = () => {
@@ -43,7 +46,9 @@ export function FindResults({ orderBase }: { orderBase: string }) {
     });
     return list.sort((x, y) => (sort === 'near' ? (Number(y.exact > 0) - Number(x.exact > 0)) || x.km - y.km : y.exact - x.exact));
   }, [db.batches, db.banks, group, comp, sort, whereAmI]);
-  const nearest = here ? rows.filter((r) => r.exact > 0).sort((a, b) => a.km - b.km)[0] : undefined;
+  // Only suggest a network centre that is actually close; otherwise the nearest real blood bank leads.
+  const nearest = here ? rows.filter((r) => r.exact > 0 && r.km <= NEAR_KM).sort((a, b) => a.km - b.km)[0] : undefined;
+  const realNearest = here ? others[0] : undefined;
   const points = useMemo<MapPoint[]>(() => {
     const net: (MapPoint & { km: number })[] = rows.filter((r) => r.b.lat != null && r.b.lng != null).map((r) => ({
       id: r.b.id, kind: 'network', lat: r.b.lat!, lng: r.b.lng!, name: r.b.name, units: r.exact, km: r.km, phone: r.b.phone.replace(/\s/g, ''),
@@ -81,7 +86,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           <Crosshair size={20} style={{ color: here ? 'var(--good)' : 'var(--brand)', marginTop: 2 }} />
           <div>
             <b>{here ? 'Showing centres nearest to you' : 'Find the nearest blood centre'}</b>
-            <div className="small muted">{here ? `Your location is accurate to about ${fmtKm(here.accuracy / 1000)}. It stays on this device and is not saved.` : 'Share your location to sort centres by real distance from you.'}</div>
+            <div className="small muted">{here ? (here.label ? `Near ${here.label} (approximate, from the place you typed).` : `Your location is accurate to about ${fmtKm(here.accuracy / 1000)}. It stays on this device and is not saved.`) : 'Share your location, or type your PIN code or city, to see the blood banks closest to you.'}</div>
           </div>
         </div>
         <button className={`btn ${here ? '' : 'primary'}`} onClick={findMe} disabled={locating}>
@@ -89,6 +94,38 @@ export function FindResults({ orderBase }: { orderBase: string }) {
         </button>
       </div>
       {geoError && <Notice tone="warn">{geoError}</Notice>}
+      {apiMode && (
+        <form className="row wrap" style={{ gap: 8 }} onSubmit={(e) => {
+          e.preventDefault();
+          if (!place.trim()) return;
+          setLocating(true); setGeoError('');
+          directory.locate(place.trim()).then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 5000, label: r.label }); setSort('near'); })
+            .catch((err) => setGeoError(err.message)).finally(() => setLocating(false));
+        }}>
+          <input className="input grow" style={{ maxWidth: 360 }} placeholder="Or type your PIN code or city, like 416416 or Kolhapur" aria-label="PIN code or city" value={place} onChange={(e) => setPlace(e.target.value)} />
+          <button className="btn" disabled={!place.trim() || locating}>Search this place</button>
+        </form>
+      )}
+
+      {realNearest && (
+        <section className="card pad stack s" aria-label="Nearest blood bank to you" style={{ borderColor: 'var(--good)' }}>
+          <div className="row between wrap">
+            <Badge tone="good">Nearest blood bank to you</Badge>
+            <span className="small strong">{fmtKm(realNearest.km)} away</span>
+          </div>
+          <div>
+            <h3 style={{ fontSize: 19 }}>{realNearest.name}</h3>
+            <div className="small muted">{[realNearest.address, realNearest.city || realNearest.district, realNearest.state].filter(Boolean).join(', ')}</div>
+            <div className="xs faint" style={{ marginTop: 3 }}>{[realNearest.category, realNearest.serviceTime && `Open ${realNearest.serviceTime}`].filter(Boolean).join(' · ')}{realNearest.onNetwork ? '' : ' · live stock not on Raktkoshika yet'}</div>
+          </div>
+          <div className="row wrap">
+            {(realNearest.phone || realNearest.mobile) && <a className="btn primary" href={`tel:${(realNearest.phone || realNearest.mobile).split(/[,/;]/)[0].replace(/[^\d+]/g, '')}`}><Phone size={15} /> Call to check stock</a>}
+            {realNearest.lat != null && realNearest.lng != null && <a className="btn" href={directionsUrl(realNearest.lat, realNearest.lng)} target="_blank" rel="noreferrer"><Navigation size={15} /> Directions</a>}
+            <Link className="btn" to={`/centres/${realNearest.id}`}>Details</Link>
+            <a className="btn" href={ERAKTKOSH_URL} target="_blank" rel="noreferrer">Stock on e-RaktKosh <ExternalLink size={13} /></a>
+          </div>
+        </section>
+      )}
 
       <section className="stack s" aria-label="Map">
         <CentresMap points={points} here={here} />
@@ -119,7 +156,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           </div>
         </section>
       )}
-      {here && !nearest && <Notice tone="warn">No Raktkoshika centre has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
+      {here && !nearest && <Notice tone="warn">No Raktkoshika centre within {NEAR_KM} km has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
 
       <div className="row between wrap">
         <div className="strong" aria-live="polite">{total} unit{total === 1 ? '' : 's'} of {gl(group)} {COMPONENTS[comp].short.toLowerCase()} near you</div>

@@ -2,6 +2,7 @@ import { config } from './config.ts';
 import { connectDb, disconnectDb } from './db.ts';
 import { createApp } from './app.ts';
 import { isEmpty, seedDatabase } from './services/seed.ts';
+import { expireBookings } from './services/orders.ts';
 
 await connectDb(); // also creates any missing tables
 if (config.seedIfEmpty && (await isEmpty())) {
@@ -34,7 +35,11 @@ if (config.keepAliveUrl) {
   console.log(`[keep-alive] pinging ${url} every ${config.keepAliveMinutes} minutes`);
 }
 
+// Bookings that passed their hold time are cancelled every 5 minutes, and their money returned.
+const bookings = setInterval(() => { expireBookings().then((n) => { if (n) console.log(`[bookings] expired ${n}`); }).catch((e) => console.warn('[bookings]', e.message)); }, 5 * 60_000);
+
 const stop = async (sig: string) => {
+  clearInterval(bookings);
   console.log(`[api] ${sig}, shutting down`);
   clearInterval(keepAlive);
   server.close();

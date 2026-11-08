@@ -1,8 +1,8 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Check, ClipboardCheck, Droplets, FileText, Megaphone, PackageX, Repeat2, Search, ShieldCheck, Syringe, Timer, Truck, X } from 'lucide-react';
-import { COMPONENTS, COMPONENT_KEYS, daysLeft, fmtDate, fmtDT, GROUPS, inr, MIN_HB, stageIndex, stageLabel, STAGES } from '../../data/rules';
-import type { BloodGroup, Component, Order } from '../../data/types';
+import { BAG_TYPES, COMPONENTS, COMPONENT_KEYS, daysLeft, fmtDate, fmtDT, GROUPS, inr, MIN_HB, stageIndex, stageLabel, STAGES } from '../../data/rules';
+import type { BagType, BloodGroup, Component, Order } from '../../data/types';
 import { useStore } from '../../store/store';
 import { RxLink } from '../../ui/RxLink';
 import { useRole } from '../../layouts/Shell';
@@ -149,7 +149,7 @@ export function BankRequests() {
             <div className="list-row" key={o.id} style={{ flexWrap: 'wrap', borderLeft: o.urgency === 'sos' && isOpen(o) ? '3px solid var(--brand)' : undefined }}>
               <GroupTag g={o.group} />
               <button className="grow" style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', minWidth: 180 }} onClick={() => setView(o)}>
-                <span className="row wrap" style={{ gap: 6 }}><b>{o.patient.name}</b>{o.urgency === 'sos' && <Badge tone="crit">Emergency</Badge>}{o.reaction && <Badge tone="crit">Reaction</Badge>}</span>
+                <span className="row wrap" style={{ gap: 6 }}><b>{o.patient.name}</b>{o.urgency === 'sos' && <Badge tone="crit">Emergency</Badge>}{o.chargeType && o.chargeType !== 'standard' && <Badge tone="info">{o.chargeType === 'replacement' ? 'Replacement donor' : 'Self donor · ELISA'}</Badge>}{o.holdUntil && isOpen(o) && <Badge>Held until {fmtDT(o.holdUntil)}</Badge>}{o.reaction && <Badge tone="crit">Reaction</Badge>}</span>
                 <span className="small muted" style={{ display: 'block' }}>{o.units} × {COMPONENTS[o.component].short} · {o.patient.hospital}</span>
                 <span className="xs faint" style={{ display: 'block' }}>{o.id}{o.scheduledFor ? ` · for ${fmtDT(o.scheduledFor)}` : ` · ${fmtDT(o.events[0].at)}`} · {o.payment.method === 'wallet' ? `${inr(o.payment.cash)} ${o.payment.settled ? 'settled' : 'held'}` : 'pays at counter'}</span>
               </button>
@@ -314,6 +314,7 @@ export function BankDonors() {
   const [tab, setTab] = useState<'booked' | 'past'>('booked');
   const [record, setRecord] = useState<string | null>(null);
   const [hb, setHb] = useState('13.5');
+  const [bag, setBag] = useState<BagType>('Triple');
   const [alert, setAlert] = useState(false);
   const all = db.donations.filter((d) => d.bankId === me);
   const list = all.filter((d) => (tab === 'booked' ? d.status === 'booked' : d.status === 'completed' || d.status === 'deferred'));
@@ -341,8 +342,16 @@ export function BankDonors() {
         <Modal title={`Record ${target.donorName}`} sub={`Group ${gl(target.group)}. Confirm the pre-donation check.`} onClose={() => setRecord(null)}>
           <div className="stack">
             <Field label="Haemoglobin (g/dL)" help={`Minimum ${MIN_HB} g/dL to donate`}><input className="input" inputMode="decimal" value={hb} onChange={(e) => setHb(e.target.value)} /></Field>
+            {!low && (
+              <Field label="Blood bag used" help={`${db.bags?.find((g) => g.bankId === target.bankId && g.type === bag)?.units ?? 0} ${bag.toLowerCase()} bags left`}>
+                <select className="select" value={bag} onChange={(e) => setBag(e.target.value as BagType)}>
+                  {BAG_TYPES.map((t) => <option key={t.type} value={t.type}>{t.type}: {t.desc}</option>)}
+                </select>
+              </Field>
+            )}
+            {target.kind === 'replacement' && target.orderId && <Notice tone="info">Replacement donor for order {target.orderId}.</Notice>}
             {low ? <Notice tone="warn">Below the minimum. This will be recorded as a deferral, and no unit or credit will be created.</Notice> : <Notice tone="good">Creates units in screening and adds 1 credit to the donor’s wallet.</Notice>}
-            <button className="btn primary block" disabled={!Number(hb)} onClick={() => { act.recordDonation(target.id, Number(hb), persona.name); setRecord(null); toast(low ? 'Deferral recorded' : 'Donation recorded. Credit added to the donor.'); }}>{low ? 'Record deferral' : 'Record donation'}</button>
+            <button className="btn primary block" disabled={!Number(hb)} onClick={() => { act.recordDonation(target.id, Number(hb), persona.name, low ? undefined : bag); setRecord(null); toast(low ? 'Deferral recorded' : 'Donation recorded. Credit added to the donor.'); }}>{low ? 'Record deferral' : 'Record donation'}</button>
           </div>
         </Modal>
       )}

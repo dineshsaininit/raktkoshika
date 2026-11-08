@@ -135,6 +135,9 @@ export const directory = {
   meta: () => raw<DirectoryMeta>('GET', '/public/directory/meta', undefined, false),
   states: () => raw<{ state: string; count: number }[]>('GET', '/public/directory/states', undefined, false),
   districts: (state: string) => raw<{ district: string; count: number }[]>('GET', `/public/directory/districts?${qs({ state })}`, undefined, false),
+  /** PIN code or city to an approximate point, for people who cannot share their location. */
+  locate: (q: string) => raw<{ lat: number; lng: number; label: string }>('GET', `/public/locate?${qs({ q })}`, undefined, false),
+  centre: (id: number) => raw<DirectoryCentre>('GET', `/public/directory/centre/${id}`, undefined, false),
   nearby: (lat: number, lng: number, limit = 8) =>
     raw<(DirectoryCentre & { km: number })[]>('GET', `/public/directory/nearby?${qs({ lat, lng, limit })}`, undefined, false),
   search: (f: { state?: string; district?: string; q?: string; category?: string; components?: boolean; page?: number; size?: number }) =>

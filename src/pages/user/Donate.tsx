@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Check, ClipboardCheck, HandHeart, MapPin, X } from 'lucide-react';
 import { daysUntilEligible, DONATION_GAP, fmtDate, MIN_HB, nextEligibleDate } from '../../data/rules';
 import { useRole } from '../../layouts/Shell';
@@ -29,6 +30,16 @@ export function Donate() {
   const [bankId, setBankId] = useState(() => db.banks.find((b) => b.verified)?.id ?? '');
   const [date, setDate] = useState(inDays(1));
   const [slot, setSlot] = useState('10:30 am');
+  const [params] = useSearchParams();
+  // Replacement donation: for one of this person's open orders, at the issuing centre's fixed times.
+  const openOrders = db.orders.filter((o) => o.ownerId === me && !['completed', 'rejected', 'cancelled'].includes(o.stage));
+  const [kind, setKind] = useState<'voluntary' | 'replacement'>(params.get('order') ? 'replacement' : 'voluntary');
+  const [orderId, setOrderId] = useState(params.get('order') ?? openOrders.find((o) => o.chargeType === 'replacement')?.id ?? openOrders[0]?.id ?? '');
+  const forOrder = openOrders.find((o) => o.id === orderId);
+  const repBank = forOrder ? db.banks.find((b) => b.id === forOrder.bankId) : undefined;
+  const slots = kind === 'replacement' ? repBank?.replacementSlots ?? [] : SLOTS;
+  const centreId = kind === 'replacement' ? repBank?.id ?? '' : bankId;
+  const chosenSlot = slots.includes(slot) ? slot : slots[0] ?? '';
   const mine = db.donations.filter((d) => d.donorId === me);
   const booked = mine.filter((d) => d.status === 'booked');
   const allYes = QUESTIONS.every((_, i) => answers[i] === true);
@@ -53,7 +64,21 @@ export function Donate() {
 
           <section className="card pad stack" style={{ opacity: passed && wait === 0 ? 1 : 0.6 }}>
             <h3 style={{ fontSize: 18 }}>2. Choose a centre and time</h3>
-            <div className="stack s">
+            <div className="grid g2" style={{ gap: 8 }}>
+              <button type="button" className={'choice ' + (kind === 'voluntary' ? 'on' : '')} onClick={() => setKind('voluntary')}><span className="tick" /><span><b>Voluntary donation</b><span className="xs muted" style={{ display: 'block' }}>Any centre, any open time. Earns a credit.</span></span></button>
+              <button type="button" className={'choice ' + (kind === 'replacement' ? 'on' : '')} onClick={() => setKind('replacement')} disabled={!openOrders.length}><span className="tick" /><span><b>Replacement donation</b><span className="xs muted" style={{ display: 'block' }}>{openOrders.length ? 'For a patient’s order, at the centre’s fixed times' : 'Needs an open blood order'}</span></span></button>
+            </div>
+            {kind === 'replacement' && (
+              <>
+                <Field label="For which order?">
+                  <select className="select" value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+                    {openOrders.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.patient.name} · {o.units} × {o.group}</option>)}
+                  </select>
+                </Field>
+                {repBank && <Notice tone="info">Replacement donors give blood at <b>{repBank.name}</b>, which is issuing the units, at its fixed times: <b>{(repBank.replacementSlots ?? []).join(', ')}</b>.</Notice>}
+              </>
+            )}
+            <div className="stack s" style={{ display: kind === 'replacement' ? 'none' : undefined }}>
               {banks.slice(0, 5).map(({ b, n }) => (
                 <button key={b.id} className={`choice ${bankId === b.id ? 'on' : ''}`} onClick={() => setBankId(b.id)} aria-pressed={bankId === b.id} disabled={!passed || wait > 0}>
                   <span className="tick" />
@@ -64,9 +89,9 @@ export function Donate() {
             </div>
             <div className="grid g2">
               <Field label="Date"><input className="input" type="date" min={inDays(0)} value={date} disabled={!passed || wait > 0} onChange={(e) => setDate(e.target.value)} /></Field>
-              <div className="field"><span className="label">Time</span><div className="chips">{SLOTS.map((s) => <button key={s} className={`chip ${slot === s ? 'on' : ''}`} disabled={!passed || wait > 0} onClick={() => setSlot(s)}>{s}</button>)}</div></div>
+              <div className="field"><span className="label">Time</span><div className="chips">{slots.map((s) => <button key={s} className={`chip ${chosenSlot === s ? 'on' : ''}`} disabled={!passed || wait > 0} onClick={() => setSlot(s)}>{s}</button>)}</div></div>
             </div>
-            <button className="btn primary" disabled={!passed || wait > 0} onClick={() => { act.bookDonation(bankId, new Date(date).toISOString(), slot); setPassed(false); toast('Slot booked. See you there!'); }}><HandHeart size={17} /> Book my slot</button>
+            <button className="btn primary" disabled={!passed || wait > 0 || !centreId || !chosenSlot} onClick={() => { act.bookDonation(centreId, new Date(date).toISOString(), chosenSlot, undefined, kind, kind === 'replacement' ? orderId : undefined); setPassed(false); toast(kind === 'replacement' ? 'Replacement donor booked. See you at ' + chosenSlot : 'Slot booked. See you there!'); }}><HandHeart size={17} /> Book my slot</button>
           </section>
         </div>
 

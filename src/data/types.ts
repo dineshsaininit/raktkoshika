@@ -2,10 +2,18 @@ export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-'
 export type Component = 'WB' | 'PRBC' | 'FFP' | 'PLT' | 'CRYO';
 export type Role = 'user' | 'bank' | 'referral' | 'franchise' | 'admin';
 export type BankType = 'Government' | 'Charitable' | 'Private';
+/** standard: normal processing charge · replacement: family gives a replacement donor · self_donor: family's own donor, ELISA test charge only */
+export type ChargeType = 'standard' | 'replacement' | 'self_donor';
+export type BagType = 'Single' | 'Double' | 'Triple' | 'Quadruple' | 'Penta';
+export interface BagStock { bankId: string; type: BagType; units: number }
 
 export interface Bank {
   id: string; name: string; city: string; district: string; type: BankType; license: string;
   km: number; rating: number; open24: boolean; verified: boolean; syncMin: number; parentId?: string; phone: string; lat?: number; lng?: number;
+  /** Centre-set rates: per unit when a replacement donor is given, and the ELISA test charge per unit for a self donor. */
+  replacementFees?: Partial<Record<Component, number>>; elisaFee?: number;
+  /** Hours a booking keeps units, fixed replacement-donor times, and whether bookings are taken 24x7. */
+  holdHours?: number; replacementSlots?: string[]; bookings24x7?: boolean;
 }
 export type BatchStatus = 'quarantine' | 'available' | 'reserved' | 'issued' | 'discarded';
 export interface Batch {
@@ -19,6 +27,7 @@ export interface Order {
   patient: { name: string; age: number; hospital: string; ward: string; doctor: string };
   group: BloodGroup; component: Component; units: number; bankId: string; scheduledFor?: string; seriesId?: string;
   fulfilment: 'collect' | 'delivery'; rx: string; rxFileId?: string; stage: Stage; events: OrderEvent[];
+  chargeType?: ChargeType; holdUntil?: string;
   payment: { method: 'wallet' | 'counter'; fee: number; total: number; creditsUsed: number; cash: number; settled: boolean };
   reaction?: string;
 }
@@ -28,6 +37,7 @@ export interface Wallet { ownerId: string; balance: number; held: number; credit
 export interface Donation {
   id: string; donorId: string; donorName: string; group: BloodGroup; bankId: string; date: string; slot: string;
   status: 'booked' | 'completed' | 'deferred' | 'cancelled'; hb?: number; note?: string; campId?: string;
+  kind?: 'voluntary' | 'replacement'; orderId?: string; bagType?: BagType;
 }
 export interface Camp {
   id: string; org: string; requestedBy: string; venue: string; city: string; date: string; target: number;
@@ -61,6 +71,8 @@ export interface DB {
   requests: DonorRequest[]; threads: Thread[]; notices: Notice[]; referrals: Referral[]; accounts: AccountEntry[];
   applications: Application[]; leads: Lead[]; tickets: Ticket[]; audit: AuditEntry[]; profile: Profile; plans: ThalPlan[];
   months: MonthPoint[]; sensors: Sensor[];
+  /** Empty blood bags by type, for blood-centre accounts. */
+  bags?: BagStock[];
   /** Signed-in account, sent by the server in API mode. */
   me?: { id: string; role: Role; name: string; org: string; initials: string };
 }

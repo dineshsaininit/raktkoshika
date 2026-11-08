@@ -88,6 +88,8 @@ export async function snapshot(m: Me) {
     months: months.map((r) => ({ m: r.m, collected: r.collected, issued: r.issued })),
     sensors: sensors.map(sensorOut),
     me: { id: m.id, role: m.role, name: m.name, org: m.org, initials: m.initials },
+    bags: (admin ? await q('select * from bag_stock order by bank_id') : bank ? await q('select * from bag_stock where bank_id = any($1)', [m.centres]) : [])
+      .map((g) => ({ bankId: g.bank_id, type: g.bag_type, units: g.units })),
   };
 }
 

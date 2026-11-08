@@ -6,6 +6,8 @@ import Landing from './pages/public/Landing';
 import Login from './pages/public/Login';
 import PublicFind from './pages/public/PublicFind';
 import Centres from './pages/public/Centres';
+import CentreDetail from './pages/public/CentreDetail';
+import { BankCharges } from './pages/bank/Charges';
 import { DirectoryPage } from './pages/shared/Directory';
 import { GovDirectory } from './pages/admin/GovDirectory';
 import { FindBlood } from './pages/shared/FindBlood';
@@ -50,6 +52,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/find" element={<PublicFind />} />
             <Route path="/centres" element={<Centres />} />
+            <Route path="/centres/:id" element={<CentreDetail />} />
             <Route path="/app/user" element={<Shell role="user" />}>
               <Route index element={<UserHome />} />
               {shared}
@@ -71,6 +74,7 @@ export default function App() {
               <Route path="referrals" element={<BankReferrals />} />
               <Route path="centres" element={<BankCentres />} />
               <Route path="accounts" element={<BankAccounts />} />
+              <Route path="charges" element={<BankCharges />} />
               <Route path="wallet" element={<WalletPage />} />
               <Route path="chat" element={<ChatPage />} />
             </Route>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Check, ClipboardList, MessagesSquare, Plus, Printer, Truck, X } from 'lucide-react';
-import { COMPONENTS, fmtDT, fmtShort, inr, stageIndex, stageLabel, STAGES } from '../../data/rules';
+import { CHARGE_TYPES, COMPONENTS, fmtDT, fmtShort, inr, stageIndex, stageLabel, STAGES } from '../../data/rules';
 import type { Order } from '../../data/types';
 import { useStore } from '../../store/store';
 import { RxLink } from '../../ui/RxLink';
@@ -135,9 +135,16 @@ export function OrderDetail() {
               <div className="row between"><span className="muted">Prescription</span><RxLink name={o.rx} fileId={o.rxFileId} /></div>
               {o.scheduledFor && <div className="row between"><span className="muted">Needed on</span><span>{fmtDT(o.scheduledFor)}</span></div>}
               <div className="row between"><span className="muted">Placed</span><span>{fmtShort(o.events[0].at)}</span></div>
+              <div className="row between top"><span className="muted">Charge</span><span className="right">{CHARGE_TYPES[o.chargeType ?? 'standard'].label}</span></div>
+              {o.holdUntil && <div className="row between top"><span className="muted">Units held until</span><span className="right strong">{fmtDT(o.holdUntil)}</span></div>}
             </div>
           </div>
           <div className="stack s">
+            {o.chargeType === 'replacement' && !closed && o.stage !== 'completed' && base.includes('/user') && (
+              db.donations.some((d) => d.orderId === o.id && d.status !== 'cancelled')
+                ? <Notice tone="good">Replacement donor booked for this order.</Notice>
+                : <Link className="btn primary block" to={`${base}/donate?order=${o.id}`}>Book replacement donor</Link>
+            )}
             <Link className="btn block" to={`${base}/chat`}><MessagesSquare size={16} /> Message the centre</Link>
             {o.payment.settled && <button className="btn block" onClick={() => window.print()}><Printer size={16} /> Print receipt</button>}
             {o.stage === 'completed' && !o.reaction && <button className="btn block" onClick={() => setReaction(true)}><AlertTriangle size={16} /> Report a transfusion reaction</button>}

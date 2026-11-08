@@ -1,5 +1,5 @@
 import type { Bank, Batch, BloodGroup, Component, DB, MonthPoint, Order, Wallet } from './types';
-import { COMPONENTS, COMPONENT_KEYS, GROUPS, processingFee } from './rules';
+import { BAG_TYPES, COMPONENTS, COMPONENT_KEYS, DEFAULT_REPLACEMENT_SLOTS, GROUPS, processingFee } from './rules';
 
 export const ME = { user: 'u1', bank: 'b1', referral: 'r1', franchise: 'f1', admin: 'a1' } as const;
 export const PERSONA = {
@@ -87,6 +87,15 @@ export function makeSeed(): DB {
     order('RK-20355', 'r1', 'completed', { group: 'A+', component: 'WB', units: 1, bankId: 'b2', patient: { name: 'Lata Chavan', age: 67, hospital: 'Sanjeevani Hospital, Miraj', ward: 'Ward 2', doctor: 'Dr. S. Joshi' } }, 150),
   ];
   const months: MonthPoint[] = MONTHS.map((m, i) => ({ m, collected: [212, 196, 188, 240, 171, 148, 162, 219, 233, 251, 268, 244][i], issued: [201, 204, 191, 226, 186, 169, 158, 204, 228, 262, 259, 237][i] }));
+  // Sample rates. Each centre sets its own in the portal: these are placeholders, not official figures.
+  for (const b of banks) {
+    const gov = b.type === 'Government';
+    Object.assign(b, {
+      replacementFees: gov ? { WB: 850, PRBC: 850, FFP: 200, PLT: 200, CRYO: 150 } : { WB: 1050, PRBC: 1050, FFP: 300, PLT: 300, CRYO: 200 },
+      elisaFee: gov ? 450 : 650, holdHours: 24, replacementSlots: DEFAULT_REPLACEMENT_SLOTS, bookings24x7: b.open24,
+    });
+  }
+  const bags = banks.filter((b) => !b.parentId).flatMap((b) => BAG_TYPES.map((t, i) => ({ bankId: b.id, type: t.type, units: [40, 60, 85, 30, b.id === 'b1' ? 6 : 18][i] })));
   const batches = makeBatches();
   batches.filter((u) => u.bankId === 'b1' && u.group === 'AB+' && u.component === 'PLT' && u.status === 'available').slice(0, 1)
     .forEach((u) => { u.status = 'reserved'; u.orderId = 'RK-20419'; });
@@ -115,7 +124,7 @@ export function makeSeed(): DB {
   orders.filter((o) => !o.payment.settled && o.payment.method === 'wallet').forEach((o) => { if (wallets[o.ownerId]) wallets[o.ownerId].held += o.payment.cash; });
 
   return {
-    banks, batches, orders, months, wallets,
+    banks, batches, orders, months, wallets, bags,
     donations: [
       { id: 'D-841', donorId: 'd4', donorName: 'Mahesh Kadam', group: 'O-', bankId: 'b1', date: iso(0, 2), slot: '11:30 am', status: 'booked' },
       { id: 'D-842', donorId: 'd5', donorName: 'Sneha Mane', group: 'B+', bankId: 'b1', date: iso(0, 3), slot: '12:00 pm', status: 'booked' },

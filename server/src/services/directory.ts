@@ -201,3 +201,35 @@ export async function nearbyDirectory(lat: number, lng: number, limit: number) {
     ) x order by km limit $3`, [lat, lng, limit]);
   return rows.map((r) => ({ ...out(r), km: Math.round(Number(r.km) * 10) / 10 }));
 }
+
+/** One directory centre with everything known about it. */
+export async function getDirectoryCentre(id: number) {
+  const r = await one(`select d.*, (select b.id from banks b where b.verified and d.license <> '' and lower(b.license) = lower(d.license) limit 1) as network_bank_id
+    from directory_centres d where d.id = $1`, [id]);
+  return r ? out(r) : null;
+}
+
+/**
+ * Turns a PIN code, city or district into an approximate point, using the coordinates of blood centres there.
+ * Used when the browser cannot share a location. No outside service is called.
+ */
+export async function locatePlace(text: string) {
+  const t = text.trim();
+  const pin = /^\d{6}$/.test(t);
+  const r = await one<{ lat: number; lng: number; n: number; label: string }>(
+    pin
+      ? `select avg(lat) as lat, avg(lng) as lng, count(*)::int as n, min(coalesce(nullif(city, ''), district)) || ', ' || min(state) as label
+         from directory_centres where lat is not null and pincode = $1`
+      : `select avg(lat) as lat, avg(lng) as lng, count(*)::int as n, min(coalesce(nullif(city, ''), district)) || ', ' || min(state) as label
+         from directory_centres where lat is not null and (lower(city) = lower($1) or lower(district) = lower($1))`,
+    [t],
+  );
+  if (r?.n) return { lat: Number(r.lat), lng: Number(r.lng), label: r.label, approximate: true };
+  if (pin) {
+    // Same postal area: the first three digits of an Indian PIN code are the sorting district.
+    const a = await one<{ lat: number; lng: number; n: number; label: string }>(`select avg(lat) as lat, avg(lng) as lng, count(*)::int as n, min(district) || ', ' || min(state) as label
+      from directory_centres where lat is not null and left(pincode, 3) = left($1, 3)`, [t]);
+    if (a?.n) return { lat: Number(a.lat), lng: Number(a.lng), label: a.label, approximate: true };
+  }
+  return null;
+}

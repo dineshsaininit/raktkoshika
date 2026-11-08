@@ -34,6 +34,7 @@ function CentreCard({ c, findBase }: { c: DirectoryCentre; findBase?: string }) 
       <div className="row wrap" style={{ gap: 6 }}>
         {phones.map((p) => <a key={p} className="btn sm" href={`tel:${tel(p)}`}><Phone size={14} /> {p}</a>)}
         {c.email && <a className="btn sm icon" href={`mailto:${c.email}`} aria-label={`Email ${c.name}`}><Mail size={14} /></a>}
+        <Link className="btn sm" to={`/centres/${c.id}`}>Details</Link>
         <a className="btn sm" href={mapsUrl(c)} target="_blank" rel="noreferrer"><Navigation size={14} /> Directions</a>
         {c.onNetwork && findBase
           ? <Link className="btn sm primary" to={findBase}>See stock</Link>

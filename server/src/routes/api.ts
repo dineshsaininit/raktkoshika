@@ -4,7 +4,7 @@ import { COMPONENT_KEYS, GROUPS } from '../../../src/data/rules.ts';
 import { config } from '../config.ts';
 import { me, requireAuth, requireRole } from '../lib/auth.ts';
 import { bus, emitChange } from '../lib/events.ts';
-import { forbidden, parse } from '../lib/http.ts';
+import { forbidden, notFound, parse } from '../lib/http.ts';
 import * as C from '../services/community.ts';
 import * as D from '../services/directory.ts';
 import * as O from '../services/orders.ts';
@@ -36,6 +36,16 @@ api.get('/public/directory/meta', async (_req, res) => { res.json(await D.direct
 api.get('/public/directory/states', async (_req, res) => { res.json(await D.directoryStates()); });
 api.get('/public/directory/districts', async (req, res) => {
   res.json(await D.directoryDistricts(parse(z.object({ state: text(80) }), req.query).state));
+});
+api.get('/public/locate', async (req, res) => {
+  const r = await D.locatePlace(parse(z.object({ q: text(60) }), req.query).q);
+  if (!r) throw notFound('We could not find that PIN code or city. Try a nearby town or district.');
+  res.json(r);
+});
+api.get('/public/directory/centre/:id', async (req, res) => {
+  const c = await D.getDirectoryCentre(parse(z.object({ id: z.coerce.number().int().positive() }), req.params).id);
+  if (!c) throw notFound('Blood bank not found');
+  res.json(c);
 });
 api.get('/public/directory/nearby', async (req, res) => {
   const f = parse(z.object({ lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180), limit: z.coerce.number().int().min(1).max(100).default(8) }), req.query);
@@ -80,6 +90,7 @@ api.post('/orders', requireRole('user', 'referral'), async (req, res) => {
     id: z.string().regex(/^RK-\d{5,6}$/).optional(), kind: z.enum(['order', 'booking']), urgency: z.enum(['sos', 'routine']), patient,
     group, component, units: z.number().int().min(1).max(10), bankId: id, scheduledFor: isoDate.nullish().transform((v) => v ?? undefined), seriesId: id.optional(),
     fulfilment: z.enum(['collect', 'delivery']), rx: text(200), rxFileId: id.optional(), method: z.enum(['wallet', 'counter']), creditsToUse: z.number().int().min(0).max(10).default(0),
+    chargeType: z.enum(['standard', 'replacement', 'self_donor']).default('standard'),
   }), req.body);
   res.status(201).json((await O.placeOrder(me(req), b)));
 });
@@ -131,12 +142,13 @@ api.post('/profile/family', requireRole('user'), async (req, res) => {
 /* ---------- donations ---------- */
 
 api.post('/donations', requireRole('user'), async (req, res) => {
-  const b = parse(z.object({ id: id.optional(), bankId: id, date: isoDate, slot: text(20), campId: id.optional() }), req.body);
+  const b = parse(z.object({ id: id.optional(), bankId: id, date: isoDate, slot: text(20), campId: id.optional(), kind: z.enum(['voluntary', 'replacement']).default('voluntary'), orderId: id.optional() }), req.body);
   res.status(201).json((await P.bookDonation(me(req), b) as Record<string, unknown>));
 });
 api.post('/donations/:id/cancel', requireRole('user'), async (req, res) => { await P.cancelDonation(me(req), param(req)); res.json(ok); });
 api.post('/donations/:id/record', requireRole('bank', 'admin'), async (req, res) => {
-  await P.recordDonation(me(req), param(req), parse(z.object({ hb: z.number().min(3).max(25) }), req.body).hb); res.json(ok);
+  const b = parse(z.object({ hb: z.number().min(3).max(25), bagType: z.enum(['Single', 'Double', 'Triple', 'Quadruple', 'Penta']).optional() }), req.body);
+  await P.recordDonation(me(req), param(req), b.hb, b.bagType); res.json(ok);
 });
 
 /* ---------- stock ---------- */
@@ -189,6 +201,21 @@ api.post('/bank/centres', requireRole('bank'), async (req, res) => {
 api.post('/bank/referrals', requireRole('bank'), async (req, res) => {
   const b = parse(z.object({ name: text(120), kind: z.enum(['Hospital', 'Clinic', 'Doctor', 'Nursing home']), city: text(60), contact: text(80) }), req.body);
   res.status(201).json((await C.addReferral(me(req), b.name, b.kind, b.city, b.contact) as Record<string, unknown>));
+});
+const fee = z.number().int().min(0).max(20_000);
+api.post('/bank/settings', requireRole('bank', 'admin'), async (req, res) => {
+  const b = parse(z.object({
+    bankId: id.optional(),
+    replacementFees: z.object({ WB: fee, PRBC: fee, FFP: fee, PLT: fee, CRYO: fee }).partial().optional(),
+    elisaFee: fee.nullable().optional(), holdHours: z.number().int().min(1).max(168).optional(),
+    replacementSlots: z.array(z.string().trim().regex(/^\d{1,2}:\d{2} (am|pm)$/, 'Times look like 9:30 am')).min(1).max(12).optional(),
+    bookings24x7: z.boolean().optional(),
+  }), req.body);
+  await P.updateSettings(me(req), b); res.json(ok);
+});
+api.post('/bank/bags', requireRole('bank', 'admin'), async (req, res) => {
+  const b = parse(z.object({ bagType: z.enum(['Single', 'Double', 'Triple', 'Quadruple', 'Penta']), delta: z.number().int().min(-1000).max(1000).refine((n) => n !== 0), bankId: id.optional() }), req.body);
+  await P.adjustBags(me(req), b.bagType, b.delta, b.bankId); res.json(ok);
 });
 api.post('/bank/expenses', requireRole('bank'), async (req, res) => {
   const b = parse(z.object({ head: text(120), amount: money, bankId: id.optional() }), req.body);

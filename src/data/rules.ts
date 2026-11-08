@@ -1,4 +1,4 @@
-import type { Bank, BloodGroup, Component, Profile } from './types';
+import type { BagType, Bank, BloodGroup, ChargeType, Component, Profile } from './types';
 
 export const GROUPS: BloodGroup[] = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 
@@ -24,6 +24,27 @@ export const FEES: Record<Component, { gov: number; other: number }> = {
   CRYO: { gov: 200, other: 250 },
 };
 export const processingFee = (c: Component, b: Pick<Bank, 'type'>) => (b.type === 'Government' ? FEES[c].gov : FEES[c].other);
+
+/** What a centre charges per unit for each way of paying. Never more than the standard processing charge. */
+export function unitCharge(c: Component, b: Pick<Bank, 'type' | 'replacementFees' | 'elisaFee'>, type: ChargeType = 'standard') {
+  const std = processingFee(c, b);
+  if (type === 'replacement' && b.replacementFees?.[c] != null) return Math.min(std, b.replacementFees[c]!);
+  if (type === 'self_donor' && b.elisaFee != null) return Math.min(std, b.elisaFee);
+  return std;
+}
+export const CHARGE_TYPES: Record<ChargeType, { label: string; desc: string }> = {
+  standard: { label: 'Standard charge', desc: 'No donor from the family' },
+  replacement: { label: 'With a replacement donor', desc: 'A relative or friend donates at the centre, at its fixed replacement times' },
+  self_donor: { label: 'Self donor (ELISA test charge)', desc: 'Your own donor gives blood for this patient; only the screening (ELISA) test is charged' },
+};
+export const BAG_TYPES: { type: BagType; desc: string }[] = [
+  { type: 'Single', desc: 'Whole blood only' },
+  { type: 'Double', desc: 'Red cells + plasma' },
+  { type: 'Triple', desc: 'Red cells, plasma, platelets' },
+  { type: 'Quadruple', desc: 'Adds cryo or SAGM storage' },
+  { type: 'Penta', desc: 'Five-bag set for full component separation' },
+];
+export const DEFAULT_REPLACEMENT_SLOTS = ['9:30 am', '11:00 am', '12:30 pm', '4:00 pm'];
 
 const RBC: Record<BloodGroup, BloodGroup[]> = {
   'O-': ['O-'], 'O+': ['O+', 'O-'], 'A-': ['A-', 'O-'], 'A+': ['A+', 'A-', 'O+', 'O-'],

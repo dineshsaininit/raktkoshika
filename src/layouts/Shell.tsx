@@ -38,19 +38,19 @@ function useNav(role: Role): NavGroup[] {
   const openTickets = db.tickets.filter((t) => t.status === 'open').length;
   switch (role) {
     case 'user': return [
-      { items: [{ to: '', label: 'Home', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'My orders', icon: ClipboardList, tab: true }] },
+      { items: [{ to: '', label: 'Home', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'My orders', icon: ClipboardList, tab: true }, { to: 'centres', label: 'Blood banks in India', icon: Building2 }] },
       { label: 'Give', items: [{ to: 'donate', label: 'Donate blood', icon: HandHeart }, { to: 'donor-requests', label: 'Donor requests', icon: Users }, { to: 'camps', label: 'Blood camps', icon: CalendarHeart }] },
       { label: 'Account', items: [{ to: 'plans', label: 'Regular transfusions', icon: Repeat }, { to: 'wallet', label: 'Wallet', icon: Wallet, tab: true }, { to: 'chat', label: 'Chat', icon: MessagesSquare }, { to: 'history', label: 'History', icon: History }, { to: 'profile', label: 'Profile', icon: UserCircle2 }] },
     ];
     case 'referral': return [
-      { items: [{ to: '', label: 'Overview', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'Patient orders', icon: ClipboardList, tab: true }, { to: 'plans', label: 'Regular transfusions', icon: Repeat }] },
+      { items: [{ to: '', label: 'Overview', icon: Home, end: true, tab: true }, { to: 'find', label: 'Find blood', icon: Search, tab: true }, { to: 'orders', label: 'Patient orders', icon: ClipboardList, tab: true }, { to: 'plans', label: 'Regular transfusions', icon: Repeat }, { to: 'centres', label: 'Blood banks in India', icon: Building2 }] },
       { label: 'Donors', items: [{ to: 'donor-requests', label: 'Donor requests', icon: Users }, { to: 'camps', label: 'Hospital camps', icon: CalendarHeart }] },
       { label: 'Account', items: [{ to: 'wallet', label: 'Hospital wallet', icon: Wallet, tab: true }, { to: 'chat', label: 'Chat', icon: MessagesSquare }, { to: 'history', label: 'History', icon: History }] },
     ];
     case 'bank': return [
       { items: [{ to: '', label: 'Today', icon: Home, end: true, tab: true }, { to: 'requests', label: 'Requests', icon: ClipboardCheck, count: queue, tab: true }, { to: 'stock', label: 'Blood stock', icon: Package, tab: true }, { to: 'donors', label: 'Donors', icon: Syringe }, { to: 'camps', label: 'Camps', icon: CalendarHeart }] },
       { label: 'Run the centre', items: [{ to: 'quality', label: 'Quality & cold chain', icon: HeartPulse }, { to: 'reports', label: 'Govt reports', icon: FileBarChart2 }, { to: 'referrals', label: 'Referrals', icon: Stethoscope }, { to: 'centres', label: 'Centres', icon: Building2 }] },
-      { label: 'Money', items: [{ to: 'accounts', label: 'Accounts', icon: Landmark }, { to: 'wallet', label: 'Wallet', icon: Wallet, tab: true }, { to: 'chat', label: 'Chat', icon: MessagesSquare }] },
+      { label: 'Money', items: [{ to: 'charges', label: 'Charges & bags', icon: ReceiptIndianRupee }, { to: 'accounts', label: 'Accounts', icon: Landmark }, { to: 'wallet', label: 'Wallet', icon: Wallet, tab: true }, { to: 'chat', label: 'Chat', icon: MessagesSquare }] },
     ];
     case 'franchise': return [
       { items: [{ to: '', label: 'Overview', icon: Home, end: true, tab: true }, { to: 'pipeline', label: 'Sales pipeline', icon: Target, tab: true }, { to: 'centres', label: 'Centres & onboarding', icon: Building2, tab: true }, { to: 'earnings', label: 'Earnings', icon: Banknote, tab: true }, { to: 'support', label: 'Support', icon: LifeBuoy, count: openTickets }, { to: 'chat', label: 'Chat', icon: MessagesSquare }] },
