@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { BadgeCheck, Clock, Crosshair, ExternalLink, Loader2, MapPin, Navigation, Phone, SlidersHorizontal, Star } from 'lucide-react';
+import { BadgeCheck, Clock, Crosshair, ExternalLink, Loader2, MapPin, Navigation, Phone, RotateCcw, SlidersHorizontal, Star } from 'lucide-react';
 import { compatibleDonors, COMPONENTS, COMPONENT_KEYS, GROUPS, inr, processingFee } from '../../data/rules';
 import type { BloodGroup, Component, Bank } from '../../data/types';
 import { useStore } from '../../store/store';
@@ -40,6 +40,22 @@ const bankMatchesState = (b: Bank, st: string) => {
   return false;
 };
 
+const bankMatchesLocation = (b: Bank, st: string, dist: string, teh: string) => {
+  if (st && !bankMatchesState(b, st)) return false;
+  if (dist) {
+    const d = dist.toLowerCase();
+    const bDist = (b.district || '').toLowerCase();
+    const bCity = (b.city || '').toLowerCase();
+    if (bDist !== d && bCity !== d) return false;
+  }
+  if (teh) {
+    const t = teh.toLowerCase();
+    const bCity = (b.city || '').toLowerCase();
+    if (!bCity.includes(t) && !t.includes(bCity)) return false;
+  }
+  return true;
+};
+
 export function FindResults({ orderBase }: { orderBase: string }) {
   const { db } = useStore();
   const [params] = useSearchParams();
@@ -50,8 +66,16 @@ export function FindResults({ orderBase }: { orderBase: string }) {
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState('');
   const [place, setPlace] = useState('');
+
+  // Dropdown filter states: State -> District -> Tehsil
   const [state, setState] = useState('');
+  const [district, setDistrict] = useState('');
+  const [tehsil, setTehsil] = useState('');
+
   const [states, setStates] = useState<{ state: string; count: number }[]>([]);
+  const [districts, setDistricts] = useState<{ district: string; count: number }[]>([]);
+  const [tehsils, setTehsils] = useState<{ tehsil: string; count: number }[]>([]);
+
   const [others, setOthers] = useState<(DirectoryCentre & { km: number })[]>([]);
   const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_RADIUS);
 
@@ -69,6 +93,24 @@ export function FindResults({ orderBase }: { orderBase: string }) {
     });
   }, []);
 
+  // When state changes, cascade load districts and tehsils
+  useEffect(() => {
+    setDistrict('');
+    setTehsil('');
+    setDistricts([]);
+    setTehsils([]);
+    if (!state || !apiMode) return;
+    directory.districts(state).then(setDistricts).catch(() => {});
+    directory.tehsils(state).then(setTehsils).catch(() => {});
+  }, [state]);
+
+  // When district changes, cascade load tehsils for that district
+  useEffect(() => {
+    setTehsil('');
+    if (!state || !apiMode) return;
+    directory.tehsils(state, district || undefined).then(setTehsils).catch(() => {});
+  }, [state, district]);
+
   const findMe = () => {
     setLocating(true); setGeoError('');
     locate().then((h) => { setHere(h); setSort('near'); }).catch((e) => setGeoError(e.message)).finally(() => setLocating(false));
@@ -77,12 +119,13 @@ export function FindResults({ orderBase }: { orderBase: string }) {
   useEffect(() => { if (params.get('near') === '1') findMe(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const whereAmI = here;
+  const hasLocationFilter = Boolean(state || district || tehsil);
 
-  // Licensed centres from the government directory near the person or in the selected state
+  // Licensed centres from the government directory near the person or matching the filters
   useEffect(() => {
     if (!apiMode) return;
     if (state) {
-      directory.search({ state, size: 60 }).then((res) => {
+      directory.search({ state, district: district || undefined, city: tehsil || undefined, size: 60 }).then((res) => {
         const mapped = res.rows.map((c) => {
           const km = whereAmI && c.lat != null && c.lng != null ? distanceKm(whereAmI, { lat: c.lat, lng: c.lng }) : 0;
           return { ...c, km };
@@ -94,29 +137,29 @@ export function FindResults({ orderBase }: { orderBase: string }) {
     } else {
       setOthers([]);
     }
-  }, [state, here, whereAmI]);
+  }, [state, district, tehsil, here, whereAmI]);
 
   const rows = useMemo(() => {
     const avail = db.batches.filter((u) => u.status === 'available' && u.component === comp);
-    const list = db.banks.filter((b) => b.verified && bankMatchesState(b, state)).map((b) => {
+    const list = db.banks.filter((b) => b.verified && bankMatchesLocation(b, state, district, tehsil)).map((b) => {
       const here = avail.filter((u) => u.bankId === b.id);
       const km = whereAmI && b.lat != null && b.lng != null ? distanceKm(whereAmI, { lat: b.lat, lng: b.lng }) : b.km;
       return { b, km, exact: here.filter((u) => u.group === group).length, alt: here.filter((u) => u.group !== group && compatibleDonors(group, comp).includes(u.group)).length };
     });
     return list.sort((x, y) => (sort === 'near' ? (Number(y.exact > 0) - Number(x.exact > 0)) || x.km - y.km : y.exact - x.exact));
-  }, [db.batches, db.banks, group, comp, sort, whereAmI, state]);
+  }, [db.batches, db.banks, group, comp, sort, whereAmI, state, district, tehsil]);
 
-  // Filter rows by radius when location is available (unless user explicitly picks a state without radius constraint)
+  // Filter rows by radius when location is available (unless user explicitly picks a location filter)
   const filteredRows = useMemo(() => {
-    if (!here || state) return rows;
+    if (!here || hasLocationFilter) return rows;
     return rows.filter((r) => r.km <= radiusKm);
-  }, [rows, here, radiusKm, state]);
+  }, [rows, here, radiusKm, hasLocationFilter]);
 
   // Filter others (directory centres) by radius too
   const filteredOthers = useMemo(() => {
-    if (!here || state) return others;
+    if (!here || hasLocationFilter) return others;
     return others.filter((c) => c.km <= radiusKm);
-  }, [others, here, radiusKm, state]);
+  }, [others, here, radiusKm, hasLocationFilter]);
 
   // Only suggest a network centre that is actually close; otherwise the nearest real blood bank leads.
   const nearest = here ? filteredRows.filter((r) => r.exact > 0 && r.km <= NEAR_KM).sort((a, b) => a.km - b.km)[0] : undefined;
@@ -137,6 +180,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
 
   const total = filteredRows.reduce((s, r) => s + r.exact, 0);
   const alts = compatibleDonors(group, comp).filter((g) => g !== group);
+  const locationLabel = [tehsil, district, state].filter(Boolean).join(', ');
 
   return (
     <div className="stack l">
@@ -158,7 +202,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           <Crosshair size={20} style={{ color: here ? 'var(--good)' : 'var(--brand)', marginTop: 2 }} />
           <div>
             <b>{here ? 'Showing centres nearest to you' : 'Find the nearest blood centre'}</b>
-            <div className="small muted">{here ? (here.label ? `Near ${here.label} (approximate, from the place you typed).` : `Your location is accurate to about ${fmtKm(here.accuracy / 1000)}. It stays on this device and is not saved.`) : 'Share your location, select your state, or type your PIN code or city, to see the blood banks closest to you.'}</div>
+            <div className="small muted">{here ? (here.label ? `Near ${here.label} (approximate, from the place you typed).` : `Your location is accurate to about ${fmtKm(here.accuracy / 1000)}. It stays on this device and is not saved.`) : 'Share your location, pick your state & district, or type your PIN code or city, to find blood centres.'}</div>
           </div>
         </div>
         <button className={`btn ${here ? '' : 'primary'}`} onClick={findMe} disabled={locating}>
@@ -167,51 +211,124 @@ export function FindResults({ orderBase }: { orderBase: string }) {
       </div>
       {geoError && <Notice tone="warn">{geoError}</Notice>}
 
-      {/* ── State filter & PIN/city search ── */}
-      <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
-        <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-          <label htmlFor="filter-state" className="small strong muted" style={{ whiteSpace: 'nowrap' }}>State:</label>
-          <select
-            id="filter-state"
-            className="select"
-            style={{ minWidth: 170 }}
-            value={state}
-            onChange={(e) => {
-              const val = e.target.value;
-              setState(val);
-              if (val && !here && apiMode) {
-                directory.locate(val).then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 50000, label: r.label }); setSort('near'); }).catch(() => {});
-              }
-            }}
-            aria-label="Filter by state"
-          >
-            <option value="">All States</option>
-            {states.map((s) => (
-              <option key={s.state} value={s.state}>
-                {s.state} {s.count ? `(${s.count})` : ''}
-              </option>
-            ))}
-          </select>
+      {/* ── Location Dropdown Filters: State, District, Tehsil/City ── */}
+      <div className="card pad stack s" style={{ background: 'var(--bg-2)' }}>
+        <div className="row between wrap" style={{ gap: 8 }}>
+          <span className="small strong muted">Filter by State, District & Tehsil / City:</span>
+          {hasLocationFilter && (
+            <button
+              className="btn sm"
+              onClick={() => {
+                setState('');
+                setDistrict('');
+                setTehsil('');
+              }}
+              style={{ fontSize: 12, gap: 4 }}
+            >
+              <RotateCcw size={12} /> Clear filters
+            </button>
+          )}
         </div>
 
+        <div className="grid g-main" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+          {/* State */}
+          <div className="field">
+            <span className="label" style={{ fontSize: 12 }}>State</span>
+            <select
+              id="filter-state"
+              className="select"
+              value={state}
+              onChange={(e) => {
+                const val = e.target.value;
+                setState(val);
+                if (val && !here && apiMode) {
+                  directory.locate(val).then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 50000, label: r.label }); setSort('near'); }).catch(() => {});
+                }
+              }}
+              aria-label="Filter by state"
+            >
+              <option value="">All States</option>
+              {states.map((s) => (
+                <option key={s.state} value={s.state}>
+                  {s.state} {s.count ? `(${s.count})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* District */}
+          <div className="field">
+            <span className="label" style={{ fontSize: 12 }}>District</span>
+            <select
+              id="filter-district"
+              className="select"
+              value={district}
+              disabled={!state}
+              onChange={(e) => {
+                const val = e.target.value;
+                setDistrict(val);
+                if (val && apiMode) {
+                  directory.locate(`${val}, ${state}`).then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 25000, label: `${r.label || val}, ${state}` }); setSort('near'); }).catch(() => {});
+                }
+              }}
+              aria-label="Filter by district"
+            >
+              <option value="">{state ? 'All Districts' : 'Pick a state first'}</option>
+              {districts.map((d) => (
+                <option key={d.district} value={d.district}>
+                  {d.district} {d.count ? `(${d.count})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Tehsil / Taluka / City */}
+          <div className="field">
+            <span className="label" style={{ fontSize: 12 }}>Tehsil / Taluka / City</span>
+            <select
+              id="filter-tehsil"
+              className="select"
+              value={tehsil}
+              disabled={!state}
+              onChange={(e) => {
+                const val = e.target.value;
+                setTehsil(val);
+                if (val && apiMode) {
+                  directory.locate(`${val}, ${district || state}`).then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 10000, label: `${r.label || val}, ${state}` }); setSort('near'); }).catch(() => {});
+                }
+              }}
+              aria-label="Filter by tehsil or city"
+            >
+              <option value="">{state ? 'All Tehsils / Cities' : 'Pick a state first'}</option>
+              {tehsils.map((t) => (
+                <option key={t.tehsil} value={t.tehsil}>
+                  {t.tehsil} {t.count ? `(${t.count})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* PIN Code / Town Search */}
         {apiMode && (
-          <form className="row wrap grow" style={{ gap: 8 }} onSubmit={(e) => {
+          <form className="row wrap" style={{ gap: 8, marginTop: 4 }} onSubmit={(e) => {
             e.preventDefault();
             if (!place.trim()) return;
             setLocating(true); setGeoError('');
-            const query = state && !place.toLowerCase().includes(state.toLowerCase()) ? `${place.trim()}, ${state}` : place.trim();
+            const parts = [place.trim(), district, state].filter(Boolean);
+            const query = parts.join(', ');
             directory.locate(query).catch(() => directory.locate(place.trim()))
               .then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 5000, label: r.label }); setSort('near'); })
               .catch((err) => setGeoError(err.message)).finally(() => setLocating(false));
           }}>
-            <input className="input grow" style={{ maxWidth: 360 }} placeholder="Or type your PIN code or city, like 416416 or Kolhapur" aria-label="PIN code or city" value={place} onChange={(e) => setPlace(e.target.value)} />
+            <input className="input grow" style={{ maxWidth: 360 }} placeholder="Or search by PIN code or city, like 416416 or Kolhapur" aria-label="PIN code or city" value={place} onChange={(e) => setPlace(e.target.value)} />
             <button className="btn" disabled={!place.trim() || locating}>Search this place</button>
           </form>
         )}
       </div>
 
       {/* ── Radius filter ── */}
-      {here && !state && (
+      {here && !hasLocationFilter && (
         <div className="card pad" style={{ background: 'var(--bg-2)' }}>
           <div className="row between wrap" style={{ gap: 10 }}>
             <div className="row" style={{ gap: 8 }}>
@@ -291,13 +408,13 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           </div>
         </section>
       )}
-      {here && !nearest && !state && <Notice tone="warn">No Raktkoshika centre within {radiusKm} km has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. {radiusKm < 100 && <>Try increasing the search radius. </>}See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
-      {state && !nearest && <Notice tone="warn">No verified Raktkoshika centre with live stock for {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in {state} yet. See the licensed centres from government records below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
+      {here && !nearest && !hasLocationFilter && <Notice tone="warn">No Raktkoshika centre within {radiusKm} km has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. {radiusKm < 100 && <>Try increasing the search radius. </>}See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
+      {hasLocationFilter && !nearest && <Notice tone="warn">No verified Raktkoshika centre with live stock for {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in {locationLabel} yet. See the licensed centres from government records below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
 
       <div className="row between wrap">
         <div className="strong" aria-live="polite">
           {total} unit{total === 1 ? '' : 's'} of {gl(group)} {COMPONENTS[comp].short.toLowerCase()}
-          {state ? ` in ${state}` : here ? ` within ${radiusKm} km` : ' near you'}
+          {locationLabel ? ` in ${locationLabel}` : here ? ` within ${radiusKm} km` : ' near you'}
         </div>
         <div className="chips">
           <button className={`chip ${sort === 'near' ? 'on' : ''}`} onClick={() => setSort('near')}>Nearest</button>
@@ -341,14 +458,14 @@ export function FindResults({ orderBase }: { orderBase: string }) {
             </div>
           </article>
         ))}
-        {!filteredRows.length && here && !state && <Empty title={`No centres within ${radiusKm} km`} />}
-        {!filteredRows.length && state && <Empty title={`No network centres with live stock in ${state}`} />}
-        {!filteredRows.length && !here && !state && !rows.length && <Empty title="No verified centres yet" />}
+        {!filteredRows.length && here && !hasLocationFilter && <Empty title={`No centres within ${radiusKm} km`} />}
+        {!filteredRows.length && hasLocationFilter && <Empty title={`No network centres with live stock in ${locationLabel}`} />}
+        {!filteredRows.length && !here && !hasLocationFilter && !rows.length && <Empty title="No verified centres yet" />}
       </div>
       {filteredOthers.length > 0 && (
         <section className="card">
           <div className="card-head">
-            <h3>{state ? `Licensed centres in ${state}` : 'Other licensed centres near you'}</h3>
+            <h3>{locationLabel ? `Licensed centres in ${locationLabel}` : 'Other licensed centres near you'}</h3>
             <span className="xs faint">Government directory · stock not on Raktkoshika</span>
           </div>
           {filteredOthers.slice(0, 16).map((c) => (

@@ -37,6 +37,10 @@ api.get('/public/directory/states', async (_req, res) => { res.json(await D.dire
 api.get('/public/directory/districts', async (req, res) => {
   res.json(await D.directoryDistricts(parse(z.object({ state: text(80) }), req.query).state));
 });
+api.get('/public/directory/tehsils', async (req, res) => {
+  const q = parse(z.object({ state: text(80), district: z.string().trim().max(80).optional() }), req.query);
+  res.json(await D.directoryTehsils(q.state, q.district));
+});
 api.get('/public/locate', async (req, res) => {
   const r = await D.locatePlace(parse(z.object({ q: text(60) }), req.query).q);
   if (!r) throw notFound('We could not find that PIN code or city. Try a nearby town or district.');
@@ -53,7 +57,7 @@ api.get('/public/directory/nearby', async (req, res) => {
 });
 api.get('/public/directory', async (req, res) => {
   const f = parse(z.object({
-    state: z.string().trim().max(80).optional(), district: z.string().trim().max(80).optional(), q: z.string().trim().max(80).optional(),
+    state: z.string().trim().max(80).optional(), district: z.string().trim().max(80).optional(), city: z.string().trim().max(80).optional(), q: z.string().trim().max(80).optional(),
     category: z.string().trim().max(40).optional(), components: z.enum(['true', 'false']).optional(),
     page: z.coerce.number().int().min(1).max(1000).default(1), size: z.coerce.number().int().min(1).max(100).default(20),
   }), req.query);

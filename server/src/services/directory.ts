@@ -164,12 +164,23 @@ export async function directoryDistricts(state: string) {
     where lower(state) = lower($1) and district <> '' group by lower(district) order by 1`, [state]);
 }
 
-export async function searchDirectory(f: { state?: string; district?: string; q?: string; category?: string; components?: boolean; page: number; size: number }) {
+export async function directoryTehsils(state: string, district?: string) {
+  const p: unknown[] = [state];
+  let and = '';
+  if (district) {
+    p.push(district);
+    and = ` and lower(district) = lower($${p.length})`;
+  }
+  return q<{ tehsil: string; count: number }>(`select min(city) as tehsil, count(*)::int as count from directory_centres
+    where lower(state) = lower($1) and city <> ''${and} group by lower(city) order by 1`, p);
+}
+export async function searchDirectory(f: { state?: string; district?: string; city?: string; q?: string; category?: string; components?: boolean; page: number; size: number }) {
   const where: string[] = [];
   const p: unknown[] = [];
   const add = (sql: string, v: unknown) => { p.push(v); where.push(sql.replace('?', `$${p.length}`)); };
   if (f.state) add('lower(d.state) = lower(?)', f.state);
   if (f.district) add('lower(d.district) = lower(?)', f.district);
+  if (f.city) add('lower(d.city) = lower(?)', f.city);
   if (f.category) add('d.category ilike ?', `%${f.category}%`);
   if (f.components) where.push('d.components is true');
   if (f.q) {
