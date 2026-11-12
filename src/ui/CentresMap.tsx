@@ -22,6 +22,55 @@ function icon(p: MapPoint) {
   return L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -8], html: '<div class="pin dir"></div>' });
 }
 
+/** Try multiple tile providers — the first one that actually loads tiles wins. */
+function addTileLayer(map: L.Map) {
+  const providers = [
+    {
+      url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
+      opts: { maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors' },
+    },
+    {
+      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      opts: { maxZoom: 20, subdomains: 'abcd', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OSM</a> &copy; <a href="https://carto.com/" target="_blank" rel="noreferrer">CARTO</a>' },
+    },
+    {
+      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      opts: { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors' },
+    },
+    {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      opts: { maxZoom: 19, attribution: 'Tiles &copy; Esri' },
+    },
+  ];
+
+  let active: L.TileLayer | null = null;
+  let found = false;
+
+  for (const p of providers) {
+    const layer = L.tileLayer(p.url, p.opts);
+    if (!found) {
+      // Add the first one immediately
+      active = layer;
+      layer.addTo(map);
+      found = true;
+
+      // If it errors out, try the next
+      layer.on('tileerror', () => {
+        if (active !== layer) return;
+        map.removeLayer(layer);
+        // Try next provider
+        const idx = providers.indexOf(p);
+        for (let i = idx + 1; i < providers.length; i++) {
+          const next = L.tileLayer(providers[i].url, providers[i].opts);
+          active = next;
+          next.addTo(map);
+          break;
+        }
+      });
+    }
+  }
+}
+
 /**
  * Map of blood centres on OpenStreetMap: red pins are Raktkoshika centres with the number of units of the
  * searched blood; small pins are licensed centres from the directory (stock not on Raktkoshika).
@@ -34,9 +83,7 @@ export function CentresMap({ points, here, height = 420 }: { points: MapPoint[];
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current, { scrollWheelZoom: false, zoomControl: true }).setView([18.5, 75.5], 6);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19, attribution: 'Tiles &copy; Esri',
-    }).addTo(map.current);
+    addTileLayer(map.current);
     layer.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; };
   }, []);
