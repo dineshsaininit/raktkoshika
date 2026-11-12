@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { BadgeCheck, Clock, Crosshair, ExternalLink, Loader2, MapPin, Navigation, Phone, SlidersHorizontal, Star } from 'lucide-react';
 import { compatibleDonors, COMPONENTS, COMPONENT_KEYS, GROUPS, inr, processingFee } from '../../data/rules';
-import type { BloodGroup, Component } from '../../data/types';
+import type { BloodGroup, Component, Bank } from '../../data/types';
 import { useStore } from '../../store/store';
 import { apiMode, directory, ERAKTKOSH_URL, type DirectoryCentre } from '../../api/client';
 import { directionsUrl, distanceKm, fmtKm, locate, type Here } from '../../ui/geo';
@@ -14,6 +14,32 @@ const NEAR_KM = 75;
 const RADIUS_OPTIONS = [5, 10, 20, 30, 50, 75, 100, 200, 500] as const;
 const DEFAULT_RADIUS = 30;
 
+const DEFAULT_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh',
+  'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir',
+  'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
+  'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan',
+  'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
+];
+
+const bankMatchesState = (b: Bank, st: string) => {
+  if (!st) return true;
+  const s = st.toLowerCase();
+  const stateCodeMap: Record<string, string> = {
+    mh: 'maharashtra', dl: 'delhi', ka: 'karnataka', gj: 'gujarat',
+    tn: 'tamil nadu', up: 'uttar pradesh', rj: 'rajasthan', wb: 'west bengal',
+    ap: 'andhra pradesh', ts: 'telangana', tg: 'telangana', kl: 'kerala',
+    mp: 'madhya pradesh', pb: 'punjab', hr: 'haryana', br: 'bihar',
+    ch: 'chandigarh', ga: 'goa', jk: 'jammu and kashmir', ut: 'uttarakhand',
+    or: 'odisha', od: 'odisha', as: 'assam', jh: 'jharkhand', cg: 'chhattisgarh',
+  };
+  const licPrefix = (b.license.split('/')[0] || '').toLowerCase();
+  if (licPrefix && stateCodeMap[licPrefix] === s) return true;
+  if (b.city && s.includes(b.city.toLowerCase())) return true;
+  if (b.district && s.includes(b.district.toLowerCase())) return true;
+  return false;
+};
+
 export function FindResults({ orderBase }: { orderBase: string }) {
   const { db } = useStore();
   const [params] = useSearchParams();
@@ -24,8 +50,24 @@ export function FindResults({ orderBase }: { orderBase: string }) {
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState('');
   const [place, setPlace] = useState('');
+  const [state, setState] = useState('');
+  const [states, setStates] = useState<{ state: string; count: number }[]>([]);
   const [others, setOthers] = useState<(DirectoryCentre & { km: number })[]>([]);
   const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_RADIUS);
+
+  // Load available states for filtering
+  useEffect(() => {
+    if (!apiMode) {
+      setStates(DEFAULT_STATES.map((s) => ({ state: s, count: 0 })));
+      return;
+    }
+    directory.states().then((res) => {
+      if (res && res.length) setStates(res);
+      else setStates(DEFAULT_STATES.map((s) => ({ state: s, count: 0 })));
+    }).catch(() => {
+      setStates(DEFAULT_STATES.map((s) => ({ state: s, count: 0 })));
+    });
+  }, []);
 
   const findMe = () => {
     setLocating(true); setGeoError('');
@@ -33,34 +75,48 @@ export function FindResults({ orderBase }: { orderBase: string }) {
   };
   // Opened with ?near=1 (from the home page): ask for location straight away.
   useEffect(() => { if (params.get('near') === '1') findMe(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // Licensed centres from the government directory near the person, for places the network does not cover yet.
-  useEffect(() => {
-    if (!here || !apiMode) { setOthers([]); return; }
-    directory.nearby(here.lat, here.lng, 40).then((r) => setOthers(r.filter((c) => !c.onNetwork))).catch(() => setOthers([]));
-  }, [here]);
 
   const whereAmI = here;
+
+  // Licensed centres from the government directory near the person or in the selected state
+  useEffect(() => {
+    if (!apiMode) return;
+    if (state) {
+      directory.search({ state, size: 60 }).then((res) => {
+        const mapped = res.rows.map((c) => {
+          const km = whereAmI && c.lat != null && c.lng != null ? distanceKm(whereAmI, { lat: c.lat, lng: c.lng }) : 0;
+          return { ...c, km };
+        });
+        setOthers(mapped.filter((c) => !c.onNetwork));
+      }).catch(() => setOthers([]));
+    } else if (here) {
+      directory.nearby(here.lat, here.lng, 40).then((r) => setOthers(r.filter((c) => !c.onNetwork))).catch(() => setOthers([]));
+    } else {
+      setOthers([]);
+    }
+  }, [state, here, whereAmI]);
+
   const rows = useMemo(() => {
     const avail = db.batches.filter((u) => u.status === 'available' && u.component === comp);
-    const list = db.banks.filter((b) => b.verified).map((b) => {
+    const list = db.banks.filter((b) => b.verified && bankMatchesState(b, state)).map((b) => {
       const here = avail.filter((u) => u.bankId === b.id);
       const km = whereAmI && b.lat != null && b.lng != null ? distanceKm(whereAmI, { lat: b.lat, lng: b.lng }) : b.km;
       return { b, km, exact: here.filter((u) => u.group === group).length, alt: here.filter((u) => u.group !== group && compatibleDonors(group, comp).includes(u.group)).length };
     });
     return list.sort((x, y) => (sort === 'near' ? (Number(y.exact > 0) - Number(x.exact > 0)) || x.km - y.km : y.exact - x.exact));
-  }, [db.batches, db.banks, group, comp, sort, whereAmI]);
+  }, [db.batches, db.banks, group, comp, sort, whereAmI, state]);
 
-  // Filter rows by radius when location is available
+  // Filter rows by radius when location is available (unless user explicitly picks a state without radius constraint)
   const filteredRows = useMemo(() => {
-    if (!here) return rows;
+    if (!here || state) return rows;
     return rows.filter((r) => r.km <= radiusKm);
-  }, [rows, here, radiusKm]);
+  }, [rows, here, radiusKm, state]);
 
   // Filter others (directory centres) by radius too
   const filteredOthers = useMemo(() => {
-    if (!here) return others;
+    if (!here || state) return others;
     return others.filter((c) => c.km <= radiusKm);
-  }, [others, here, radiusKm]);
+  }, [others, here, radiusKm, state]);
 
   // Only suggest a network centre that is actually close; otherwise the nearest real blood bank leads.
   const nearest = here ? filteredRows.filter((r) => r.exact > 0 && r.km <= NEAR_KM).sort((a, b) => a.km - b.km)[0] : undefined;
@@ -74,7 +130,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
     const dirPts: (MapPoint & { km: number })[] = filteredOthers.filter((c) => c.lat != null && c.lng != null).map((c) => ({
       id: `d${c.id}`, kind: 'directory', lat: c.lat!, lng: c.lng!, name: c.name, km: c.km,
       phone: (c.phone || c.mobile).split(/[,/;]/)[0].replace(/[^\d+]/g, '') || undefined,
-      lines: [[c.city || c.district, c.state].filter(Boolean).join(', '), `${fmtKm(c.km)} away · stock: call or check e-RaktKosh`],
+      lines: [[c.city || c.district, c.state].filter(Boolean).join(', '), `${c.km > 0 ? `${fmtKm(c.km)} away · ` : ''}stock: call or check e-RaktKosh`],
     }));
     return [...net, ...dirPts].sort((a, b) => a.km - b.km);
   }, [filteredRows, filteredOthers, group, comp, here, orderBase]);
@@ -102,7 +158,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           <Crosshair size={20} style={{ color: here ? 'var(--good)' : 'var(--brand)', marginTop: 2 }} />
           <div>
             <b>{here ? 'Showing centres nearest to you' : 'Find the nearest blood centre'}</b>
-            <div className="small muted">{here ? (here.label ? `Near ${here.label} (approximate, from the place you typed).` : `Your location is accurate to about ${fmtKm(here.accuracy / 1000)}. It stays on this device and is not saved.`) : 'Share your location, or type your PIN code or city, to see the blood banks closest to you.'}</div>
+            <div className="small muted">{here ? (here.label ? `Near ${here.label} (approximate, from the place you typed).` : `Your location is accurate to about ${fmtKm(here.accuracy / 1000)}. It stays on this device and is not saved.`) : 'Share your location, select your state, or type your PIN code or city, to see the blood banks closest to you.'}</div>
           </div>
         </div>
         <button className={`btn ${here ? '' : 'primary'}`} onClick={findMe} disabled={locating}>
@@ -110,21 +166,52 @@ export function FindResults({ orderBase }: { orderBase: string }) {
         </button>
       </div>
       {geoError && <Notice tone="warn">{geoError}</Notice>}
-      {apiMode && (
-        <form className="row wrap" style={{ gap: 8 }} onSubmit={(e) => {
-          e.preventDefault();
-          if (!place.trim()) return;
-          setLocating(true); setGeoError('');
-          directory.locate(place.trim()).then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 5000, label: r.label }); setSort('near'); })
-            .catch((err) => setGeoError(err.message)).finally(() => setLocating(false));
-        }}>
-          <input className="input grow" style={{ maxWidth: 360 }} placeholder="Or type your PIN code or city, like 416416 or Kolhapur" aria-label="PIN code or city" value={place} onChange={(e) => setPlace(e.target.value)} />
-          <button className="btn" disabled={!place.trim() || locating}>Search this place</button>
-        </form>
-      )}
+
+      {/* ── State filter & PIN/city search ── */}
+      <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
+        <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+          <label htmlFor="filter-state" className="small strong muted" style={{ whiteSpace: 'nowrap' }}>State:</label>
+          <select
+            id="filter-state"
+            className="select"
+            style={{ minWidth: 170 }}
+            value={state}
+            onChange={(e) => {
+              const val = e.target.value;
+              setState(val);
+              if (val && !here && apiMode) {
+                directory.locate(val).then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 50000, label: r.label }); setSort('near'); }).catch(() => {});
+              }
+            }}
+            aria-label="Filter by state"
+          >
+            <option value="">All States</option>
+            {states.map((s) => (
+              <option key={s.state} value={s.state}>
+                {s.state} {s.count ? `(${s.count})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {apiMode && (
+          <form className="row wrap grow" style={{ gap: 8 }} onSubmit={(e) => {
+            e.preventDefault();
+            if (!place.trim()) return;
+            setLocating(true); setGeoError('');
+            const query = state && !place.toLowerCase().includes(state.toLowerCase()) ? `${place.trim()}, ${state}` : place.trim();
+            directory.locate(query).catch(() => directory.locate(place.trim()))
+              .then((r) => { setHere({ lat: r.lat, lng: r.lng, accuracy: 5000, label: r.label }); setSort('near'); })
+              .catch((err) => setGeoError(err.message)).finally(() => setLocating(false));
+          }}>
+            <input className="input grow" style={{ maxWidth: 360 }} placeholder="Or type your PIN code or city, like 416416 or Kolhapur" aria-label="PIN code or city" value={place} onChange={(e) => setPlace(e.target.value)} />
+            <button className="btn" disabled={!place.trim() || locating}>Search this place</button>
+          </form>
+        )}
+      </div>
 
       {/* ── Radius filter ── */}
-      {here && (
+      {here && !state && (
         <div className="card pad" style={{ background: 'var(--bg-2)' }}>
           <div className="row between wrap" style={{ gap: 10 }}>
             <div className="row" style={{ gap: 8 }}>
@@ -168,7 +255,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
         <section className="card pad stack s" aria-label="Nearest blood bank to you" style={{ borderColor: 'var(--good)' }}>
           <div className="row between wrap">
             <Badge tone="good">Nearest blood bank to you</Badge>
-            <span className="small strong">{fmtKm(realNearest.km)} away</span>
+            {realNearest.km > 0 && <span className="small strong">{fmtKm(realNearest.km)} away</span>}
           </div>
           <div>
             <h3 style={{ fontSize: 19 }}>{realNearest.name}</h3>
@@ -204,10 +291,14 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           </div>
         </section>
       )}
-      {here && !nearest && <Notice tone="warn">No Raktkoshika centre within {radiusKm} km has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. {radiusKm < 100 && <>Try increasing the search radius. </>}See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
+      {here && !nearest && !state && <Notice tone="warn">No Raktkoshika centre within {radiusKm} km has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. {radiusKm < 100 && <>Try increasing the search radius. </>}See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
+      {state && !nearest && <Notice tone="warn">No verified Raktkoshika centre with live stock for {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in {state} yet. See the licensed centres from government records below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
 
       <div className="row between wrap">
-        <div className="strong" aria-live="polite">{total} unit{total === 1 ? '' : 's'} of {gl(group)} {COMPONENTS[comp].short.toLowerCase()}{here ? ` within ${radiusKm} km` : ' near you'}</div>
+        <div className="strong" aria-live="polite">
+          {total} unit{total === 1 ? '' : 's'} of {gl(group)} {COMPONENTS[comp].short.toLowerCase()}
+          {state ? ` in ${state}` : here ? ` within ${radiusKm} km` : ' near you'}
+        </div>
         <div className="chips">
           <button className={`chip ${sort === 'near' ? 'on' : ''}`} onClick={() => setSort('near')}>Nearest</button>
           <button className={`chip ${sort === 'stock' ? 'on' : ''}`} onClick={() => setSort('stock')}>Most stock</button>
@@ -250,17 +341,21 @@ export function FindResults({ orderBase }: { orderBase: string }) {
             </div>
           </article>
         ))}
-        {!filteredRows.length && here && <Empty title={`No centres within ${radiusKm} km`} />}
-        {!filteredRows.length && !here && !rows.length && <Empty title="No verified centres yet" />}
+        {!filteredRows.length && here && !state && <Empty title={`No centres within ${radiusKm} km`} />}
+        {!filteredRows.length && state && <Empty title={`No network centres with live stock in ${state}`} />}
+        {!filteredRows.length && !here && !state && !rows.length && <Empty title="No verified centres yet" />}
       </div>
       {filteredOthers.length > 0 && (
         <section className="card">
-          <div className="card-head"><h3>Other licensed centres near you</h3><span className="xs faint">Government directory · stock not on Raktkoshika</span></div>
-          {filteredOthers.slice(0, 8).map((c) => (
+          <div className="card-head">
+            <h3>{state ? `Licensed centres in ${state}` : 'Other licensed centres near you'}</h3>
+            <span className="xs faint">Government directory · stock not on Raktkoshika</span>
+          </div>
+          {filteredOthers.slice(0, 16).map((c) => (
             <div className="list-row" key={c.id} style={{ flexWrap: 'wrap' }}>
               <div className="grow" style={{ minWidth: 200 }}>
                 <b style={{ fontSize: 14.5 }}>{c.name}</b>
-                <div className="xs muted">{fmtKm(c.km)} · {[c.city || c.district, c.state].filter(Boolean).join(', ')}{c.category ? ` · ${c.category}` : ''}{c.serviceTime ? ` · ${c.serviceTime}` : ''}</div>
+                <div className="xs muted">{c.km > 0 ? `${fmtKm(c.km)} · ` : ''}{[c.city || c.district, c.state].filter(Boolean).join(', ')}{c.category ? ` · ${c.category}` : ''}{c.serviceTime ? ` · ${c.serviceTime}` : ''}</div>
               </div>
               <div className="row" style={{ gap: 6 }}>
                 {(c.phone || c.mobile) && <a className="btn sm icon" href={`tel:${(c.phone || c.mobile).split(/[,/;]/)[0].replace(/[^\d+]/g, '')}`} aria-label={`Call ${c.name}`}><Phone size={14} /></a>}
