@@ -34,9 +34,8 @@ export function CentresMap({ points, here, height = 420 }: { points: MapPoint[];
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current, { scrollWheelZoom: false, zoomControl: true }).setView([18.5, 75.5], 6);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 20, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/" target="_blank" rel="noreferrer">CARTO</a>',
-      subdomains: 'abcd',
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19, attribution: 'Tiles &copy; Esri',
     }).addTo(map.current);
     layer.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; };
