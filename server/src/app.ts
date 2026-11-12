@@ -19,8 +19,13 @@ export function createApp() {
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
-        'default-src': ["'self'"], 'img-src': ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org'], 'style-src': ["'self'", "'unsafe-inline'"],
-        'font-src': ["'self'", 'data:'], 'connect-src': ["'self'"], 'frame-src': ["'self'", 'blob:'], 'object-src': ["'self'", 'blob:'],
+        'default-src': ["'self'"],
+        'img-src': ["'self'", 'data:', 'blob:', 'https:'],
+        'style-src': ["'self'", "'unsafe-inline'"],
+        'font-src': ["'self'", 'data:'],
+        'connect-src': ["'self'"],
+        'frame-src': ["'self'", 'blob:'],
+        'object-src': ["'self'", 'blob:'],
       },
     },
   }));
