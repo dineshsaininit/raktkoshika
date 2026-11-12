@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { BadgeCheck, Clock, Crosshair, ExternalLink, Loader2, MapPin, Navigation, Phone, Star } from 'lucide-react';
+import { BadgeCheck, Clock, Crosshair, ExternalLink, Loader2, MapPin, Navigation, Phone, SlidersHorizontal, Star } from 'lucide-react';
 import { compatibleDonors, COMPONENTS, COMPONENT_KEYS, GROUPS, inr, processingFee } from '../../data/rules';
 import type { BloodGroup, Component } from '../../data/types';
 import { useStore } from '../../store/store';
@@ -11,6 +11,8 @@ import { useRole } from '../../layouts/Shell';
 import { Badge, Empty, gl, Notice, PageHead } from '../../ui/kit';
 
 const NEAR_KM = 75;
+const RADIUS_OPTIONS = [5, 10, 20, 30, 50, 75, 100, 200, 500] as const;
+const DEFAULT_RADIUS = 30;
 
 export function FindResults({ orderBase }: { orderBase: string }) {
   const { db } = useStore();
@@ -23,6 +25,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
   const [geoError, setGeoError] = useState('');
   const [place, setPlace] = useState('');
   const [others, setOthers] = useState<(DirectoryCentre & { km: number })[]>([]);
+  const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_RADIUS);
 
   const findMe = () => {
     setLocating(true); setGeoError('');
@@ -46,24 +49,37 @@ export function FindResults({ orderBase }: { orderBase: string }) {
     });
     return list.sort((x, y) => (sort === 'near' ? (Number(y.exact > 0) - Number(x.exact > 0)) || x.km - y.km : y.exact - x.exact));
   }, [db.batches, db.banks, group, comp, sort, whereAmI]);
+
+  // Filter rows by radius when location is available
+  const filteredRows = useMemo(() => {
+    if (!here) return rows;
+    return rows.filter((r) => r.km <= radiusKm);
+  }, [rows, here, radiusKm]);
+
+  // Filter others (directory centres) by radius too
+  const filteredOthers = useMemo(() => {
+    if (!here) return others;
+    return others.filter((c) => c.km <= radiusKm);
+  }, [others, here, radiusKm]);
+
   // Only suggest a network centre that is actually close; otherwise the nearest real blood bank leads.
-  const nearest = here ? rows.filter((r) => r.exact > 0 && r.km <= NEAR_KM).sort((a, b) => a.km - b.km)[0] : undefined;
-  const realNearest = here ? others[0] : undefined;
+  const nearest = here ? filteredRows.filter((r) => r.exact > 0 && r.km <= NEAR_KM).sort((a, b) => a.km - b.km)[0] : undefined;
+  const realNearest = here ? filteredOthers[0] : undefined;
   const points = useMemo<MapPoint[]>(() => {
-    const net: (MapPoint & { km: number })[] = rows.filter((r) => r.b.lat != null && r.b.lng != null).map((r) => ({
+    const net: (MapPoint & { km: number })[] = filteredRows.filter((r) => r.b.lat != null && r.b.lng != null).map((r) => ({
       id: r.b.id, kind: 'network', lat: r.b.lat!, lng: r.b.lng!, name: r.b.name, units: r.exact, km: r.km, phone: r.b.phone.replace(/\s/g, ''),
       lines: [`${r.exact} unit${r.exact === 1 ? '' : 's'} of ${gl(group)} ${COMPONENTS[comp].short.toLowerCase()}`, `${r.b.city} · ${fmtKm(r.km)}${here ? '' : ' from Sangli'}`],
       requestUrl: r.exact > 0 ? `#${orderBase}?group=${encodeURIComponent(group)}&component=${comp}&bank=${r.b.id}` : undefined,
     }));
-    const dirPts: (MapPoint & { km: number })[] = others.filter((c) => c.lat != null && c.lng != null).map((c) => ({
+    const dirPts: (MapPoint & { km: number })[] = filteredOthers.filter((c) => c.lat != null && c.lng != null).map((c) => ({
       id: `d${c.id}`, kind: 'directory', lat: c.lat!, lng: c.lng!, name: c.name, km: c.km,
       phone: (c.phone || c.mobile).split(/[,/;]/)[0].replace(/[^\d+]/g, '') || undefined,
       lines: [[c.city || c.district, c.state].filter(Boolean).join(', '), `${fmtKm(c.km)} away · stock: call or check e-RaktKosh`],
     }));
     return [...net, ...dirPts].sort((a, b) => a.km - b.km);
-  }, [rows, others, group, comp, here, orderBase]);
+  }, [filteredRows, filteredOthers, group, comp, here, orderBase]);
 
-  const total = rows.reduce((s, r) => s + r.exact, 0);
+  const total = filteredRows.reduce((s, r) => s + r.exact, 0);
   const alts = compatibleDonors(group, comp).filter((g) => g !== group);
 
   return (
@@ -107,6 +123,47 @@ export function FindResults({ orderBase }: { orderBase: string }) {
         </form>
       )}
 
+      {/* ── Radius filter ── */}
+      {here && (
+        <div className="card pad" style={{ background: 'var(--bg-2)' }}>
+          <div className="row between wrap" style={{ gap: 10 }}>
+            <div className="row" style={{ gap: 8 }}>
+              <SlidersHorizontal size={16} style={{ color: 'var(--brand)', flexShrink: 0, marginTop: 1 }} />
+              <span className="strong" style={{ fontSize: 14 }}>Search radius</span>
+            </div>
+            <span className="strong" style={{ fontSize: 18, color: 'var(--brand)', minWidth: 60, textAlign: 'right' }}>{radiusKm} km</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={RADIUS_OPTIONS.length - 1}
+            value={RADIUS_OPTIONS.indexOf(radiusKm as typeof RADIUS_OPTIONS[number])}
+            onChange={(e) => setRadiusKm(RADIUS_OPTIONS[Number(e.target.value)])}
+            style={{ width: '100%', marginTop: 8, accentColor: 'var(--brand)', cursor: 'pointer' }}
+            aria-label="Search radius in kilometres"
+          />
+          <div className="row between" style={{ marginTop: 4 }}>
+            <span className="xs muted">{RADIUS_OPTIONS[0]} km</span>
+            <span className="xs muted">{RADIUS_OPTIONS[RADIUS_OPTIONS.length - 1]} km</span>
+          </div>
+          <div className="chips" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+            {RADIUS_OPTIONS.map((r) => (
+              <button key={r} className={`chip ${radiusKm === r ? 'on' : ''}`} aria-pressed={radiusKm === r} onClick={() => setRadiusKm(r)}>{r} km</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <section className="stack s" aria-label="Map">
+        <CentresMap points={points} here={here} />
+        <div className="map-legend">
+          <span><i style={{ background: '#C4283F' }} />Raktkoshika centre (number = units in stock)</span>
+          <span><i style={{ background: '#E8AE52' }} />Licensed centre near you (stock not on Raktkoshika)</span>
+          {here && <span><i style={{ background: '#1570B8' }} />You</span>}
+        </div>
+      </section>
+
+      {/* ── Nearest blood bank (appears right below the map) ── */}
       {realNearest && (
         <section className="card pad stack s" aria-label="Nearest blood bank to you" style={{ borderColor: 'var(--good)' }}>
           <div className="row between wrap">
@@ -126,15 +183,6 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           </div>
         </section>
       )}
-
-      <section className="stack s" aria-label="Map">
-        <CentresMap points={points} here={here} />
-        <div className="map-legend">
-          <span><i style={{ background: '#C4283F' }} />Raktkoshika centre (number = units in stock)</span>
-          <span><i style={{ background: '#E8AE52' }} />Licensed centre near you (stock not on Raktkoshika)</span>
-          {here && <span><i style={{ background: '#1570B8' }} />You</span>}
-        </div>
-      </section>
 
       {nearest && nearest.b.lat != null && nearest.b.lng != null && (
         <section className="card pad stack s" style={{ borderColor: 'var(--brand)', boxShadow: '0 16px 40px -24px var(--brand)' }} aria-label="Nearest centre with stock">
@@ -156,10 +204,10 @@ export function FindResults({ orderBase }: { orderBase: string }) {
           </div>
         </section>
       )}
-      {here && !nearest && <Notice tone="warn">No Raktkoshika centre within {NEAR_KM} km has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
+      {here && !nearest && <Notice tone="warn">No Raktkoshika centre within {radiusKm} km has {gl(group)} {COMPONENTS[comp].short.toLowerCase()} in stock right now. {radiusKm < 100 && <>Try increasing the search radius. </>}See the licensed centres near you below, or check <a href={ERAKTKOSH_URL} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>e-RaktKosh</a>.</Notice>}
 
       <div className="row between wrap">
-        <div className="strong" aria-live="polite">{total} unit{total === 1 ? '' : 's'} of {gl(group)} {COMPONENTS[comp].short.toLowerCase()} near you</div>
+        <div className="strong" aria-live="polite">{total} unit{total === 1 ? '' : 's'} of {gl(group)} {COMPONENTS[comp].short.toLowerCase()}{here ? ` within ${radiusKm} km` : ' near you'}</div>
         <div className="chips">
           <button className={`chip ${sort === 'near' ? 'on' : ''}`} onClick={() => setSort('near')}>Nearest</button>
           <button className={`chip ${sort === 'stock' ? 'on' : ''}`} onClick={() => setSort('stock')}>Most stock</button>
@@ -169,7 +217,7 @@ export function FindResults({ orderBase }: { orderBase: string }) {
       {total === 0 && <Notice tone="warn"><b>No exact match right now.</b> Post a donor request so eligible donors nearby can help{alts.length ? `, and ask the treating doctor whether ${alts.map(gl).join(', ')} may be suitable` : ''}.</Notice>}
 
       <div className="grid g2">
-        {rows.map(({ b, km, exact, alt }) => (
+        {filteredRows.map(({ b, km, exact, alt }) => (
           <article className="card pad stack s" key={b.id}>
             <div className="row between top">
               <div className="grow">
@@ -202,12 +250,13 @@ export function FindResults({ orderBase }: { orderBase: string }) {
             </div>
           </article>
         ))}
-        {!rows.length && <Empty title="No verified centres yet" />}
+        {!filteredRows.length && here && <Empty title={`No centres within ${radiusKm} km`} />}
+        {!filteredRows.length && !here && !rows.length && <Empty title="No verified centres yet" />}
       </div>
-      {others.length > 0 && (
+      {filteredOthers.length > 0 && (
         <section className="card">
           <div className="card-head"><h3>Other licensed centres near you</h3><span className="xs faint">Government directory · stock not on Raktkoshika</span></div>
-          {others.slice(0, 8).map((c) => (
+          {filteredOthers.slice(0, 8).map((c) => (
             <div className="list-row" key={c.id} style={{ flexWrap: 'wrap' }}>
               <div className="grow" style={{ minWidth: 200 }}>
                 <b style={{ fontSize: 14.5 }}>{c.name}</b>
